@@ -11,6 +11,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
+	"github.com/apache/rocketmq-client-go/v2/rlog"
 	"github.com/qvcloud/broker"
 )
 
@@ -455,6 +456,12 @@ func WithTracingEnabled(enabled bool) broker.Option {
 func WithNamespace(ns string) broker.Option {
 	return func(o *broker.Options) {
 		o.Context = broker.WithTrackedValue(o.Context, namespaceKey{}, ns, "rocketmq.WithNamespace")
+	}
+}
+
+func WithLogLevel(level string) broker.Option {
+	return func(o *broker.Options) {
+		rlog.SetLogLevel(level)
 	}
 }
 
