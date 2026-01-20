@@ -35,6 +35,9 @@ type Options struct {
 
 	// Logger for debug/info logging.
 	Logger Logger
+
+	// ClientID is a unique identifier for the client.
+	ClientID string
 }
 
 // Logger is a simple logging interface.
@@ -109,6 +112,13 @@ func Addrs(addrs ...string) Option {
 func Codec(c Marshaler) Option {
 	return func(o *Options) {
 		o.Codec = c
+	}
+}
+
+// ClientID sets the client identifier.
+func ClientID(id string) Option {
+	return func(o *Options) {
+		o.ClientID = id
 	}
 }
 

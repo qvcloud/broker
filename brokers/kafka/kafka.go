@@ -47,6 +47,7 @@ func (k *kafkaBroker) Connect() error {
 	}
 
 	dialer := &kafka.Dialer{
+		ClientID:  k.opts.ClientID,
 		Timeout:   10 * time.Second,
 		DualStack: true,
 		TLS:       k.opts.TLSConfig,
@@ -122,6 +123,7 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 	options := broker.NewSubscribeOptions(opts...)
 
 	dialer := &kafka.Dialer{
+		ClientID:  k.opts.ClientID,
 		Timeout:   10 * time.Second,
 		DualStack: true,
 		TLS:       k.opts.TLSConfig,

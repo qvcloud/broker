@@ -51,10 +51,14 @@ func (r *rmqBroker) Connect() error {
 	}
 
 	if r.producer == nil {
-		p, err := rocketmq.NewProducer(
+		opts := []producer.Option{
 			producer.WithNameServer(r.opts.Addrs),
 			producer.WithRetry(2),
-		)
+		}
+		if r.opts.ClientID != "" {
+			opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
+		}
+		p, err := rocketmq.NewProducer(opts...)
 		if err != nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ producer creation error: %v", err)
@@ -190,10 +194,15 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	r.Lock()
 	brokerCtx := r.ctx
 	if r.consumer == nil {
-		c, err := rocketmq.NewPushConsumer(
+		opts := []consumer.Option{
 			consumer.WithNameServer(r.opts.Addrs),
 			consumer.WithGroupName(groupID),
-		)
+		}
+		if r.opts.ClientID != "" {
+			opts = append(opts, consumer.WithInstance(r.opts.ClientID))
+		}
+
+		c, err := rocketmq.NewPushConsumer(opts...)
 		if err != nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ consumer creation error: %v", err)

@@ -53,6 +53,9 @@ func (n *natsBroker) Connect() error {
 	if n.opts.TLSConfig != nil {
 		opts = append(opts, nats.Secure(n.opts.TLSConfig))
 	}
+	if n.opts.ClientID != "" {
+		opts = append(opts, nats.Name(n.opts.ClientID))
+	}
 
 	conn, err = nats.Connect(addr, opts...)
 	if err != nil {

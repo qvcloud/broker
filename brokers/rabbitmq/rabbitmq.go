@@ -47,16 +47,16 @@ func (r *rmqBroker) Connect() error {
 	}
 
 	addr := r.Address()
-	var (
-		conn *amqp.Connection
-		err  error
-	)
-
-	if r.opts.TLSConfig != nil {
-		conn, err = amqp.DialTLS(addr, r.opts.TLSConfig)
-	} else {
-		conn, err = amqp.Dial(addr)
+	config := amqp.Config{
+		TLSClientConfig: r.opts.TLSConfig,
 	}
+	if r.opts.ClientID != "" {
+		config.Properties = amqp.Table{
+			"connection_name": r.opts.ClientID,
+		}
+	}
+
+	conn, err := amqp.DialConfig(addr, config)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (r *rmqBroker) Connect() error {
 					}
 				}
 			}
-			
+
 			select {
 			case <-ctx.Done():
 				return
@@ -246,7 +246,7 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 				false,  // exclusive
 				false,  // no-local
 				false,  // no-wait
-				nil,   // args
+				nil,    // args
 			)
 			if err != nil {
 				ch.Close()
