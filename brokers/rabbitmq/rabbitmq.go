@@ -158,11 +158,18 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		headers["x-delay"] = int64(options.Delay.Milliseconds())
 	}
 
+	exchange := ""
+	if r.opts.Context != nil {
+		if v, ok := r.opts.Context.Value(exchangeKey{}).(string); ok {
+			exchange = v
+		}
+	}
+
 	err := ch.PublishWithContext(ctx,
-		"",    // exchange
-		topic, // routing key
-		false, // mandatory
-		false, // immediate
+		exchange, // exchange
+		topic,    // routing key
+		false,    // mandatory
+		false,    // immediate
 		amqp.Publishing{
 			Headers:     amqp.Table(headers),
 			ContentType: "application/octet-stream",
@@ -215,6 +222,35 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 				continue
 			}
 
+			// Extract options
+			durable := true
+			autoDelete := false
+			prefetchCount := 0
+			exchange := ""
+			exchangeType := "direct"
+
+			if r.opts.Context != nil {
+				if v, ok := r.opts.Context.Value(durableKey{}).(bool); ok {
+					durable = v
+				}
+				if v, ok := r.opts.Context.Value(autoDeleteKey{}).(bool); ok {
+					autoDelete = v
+				}
+				if v, ok := r.opts.Context.Value(prefetchCountKey{}).(int); ok {
+					prefetchCount = v
+				}
+				if v, ok := r.opts.Context.Value(exchangeKey{}).(string); ok {
+					exchange = v
+				}
+				if v, ok := r.opts.Context.Value(exchangeTypeKey{}).(string); ok {
+					exchangeType = v
+				}
+			}
+
+			if prefetchCount > 0 {
+				ch.Qos(prefetchCount, 0, false)
+			}
+
 			args := amqp.Table{}
 			if options.DeadLetterQueue != "" {
 				args["x-dead-letter-exchange"] = ""
@@ -223,8 +259,8 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 
 			q, err := ch.QueueDeclare(
 				options.Queue, // name
-				true,          // durable
-				false,         // delete when unused
+				durable,       // durable
+				autoDelete,    // delete when unused
 				false,         // exclusive
 				false,         // no-wait
 				args,          // arguments
@@ -235,8 +271,12 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 				continue
 			}
 
-			if topic != "" && topic != options.Queue {
-				ch.QueueBind(q.Name, topic, "", false, nil)
+			if exchange != "" {
+				ch.ExchangeDeclare(exchange, exchangeType, true, false, false, false, nil)
+			}
+
+			if topic != "" && (topic != options.Queue || exchange != "") {
+				ch.QueueBind(q.Name, topic, exchange, false, nil)
 			}
 
 			msgs, err := ch.Consume(
@@ -321,6 +361,57 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &rmqBroker{
 		opts: *options,
+	}
+}
+
+type exchangeKey struct{}
+type exchangeTypeKey struct{}
+type prefetchCountKey struct{}
+type durableKey struct{}
+type autoDeleteKey struct{}
+
+func WithExchange(name string) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, exchangeKey{}, name)
+	}
+}
+
+func WithExchangeType(kind string) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, exchangeTypeKey{}, kind)
+	}
+}
+
+func WithPrefetchCount(count int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, prefetchCountKey{}, count)
+	}
+}
+
+func WithDurable(durable bool) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, durableKey{}, durable)
+	}
+}
+
+func WithAutoDelete(autoDelete bool) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, autoDeleteKey{}, autoDelete)
 	}
 }
 

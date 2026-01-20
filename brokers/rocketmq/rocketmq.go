@@ -53,8 +53,26 @@ func (r *rmqBroker) Connect() error {
 	if r.producer == nil {
 		opts := []producer.Option{
 			producer.WithNameServer(r.opts.Addrs),
-			producer.WithRetry(2),
 		}
+
+		// Extract custom options from Context
+		retry := 2
+		if r.opts.Context != nil {
+			if v, ok := r.opts.Context.Value(retryKey{}).(int); ok {
+				retry = v
+			}
+			if v, ok := r.opts.Context.Value(groupNameKey{}).(string); ok {
+				opts = append(opts, producer.WithGroupName(v))
+			}
+			if v, ok := r.opts.Context.Value(namespaceKey{}).(string); ok {
+				opts = append(opts, producer.WithNamespace(v))
+			}
+			if v, ok := r.opts.Context.Value(tracingKey{}).(bool); ok && v {
+				opts = append(opts, producer.WithTrace(&primitive.TraceConfig{}))
+			}
+		}
+		opts = append(opts, producer.WithRetry(retry))
+
 		if r.opts.ClientID != "" {
 			opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
 		}
@@ -188,6 +206,13 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 
 	groupID := options.Queue
 	if groupID == "" {
+		if r.opts.Context != nil {
+			if v, ok := r.opts.Context.Value(groupNameKey{}).(string); ok {
+				groupID = v
+			}
+		}
+	}
+	if groupID == "" {
 		groupID = "GID_DEFAULT"
 	}
 
@@ -198,6 +223,16 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 			consumer.WithNameServer(r.opts.Addrs),
 			consumer.WithGroupName(groupID),
 		}
+
+		if r.opts.Context != nil {
+			if v, ok := r.opts.Context.Value(concurrencyKey{}).(int); ok {
+				opts = append(opts, consumer.WithConsumeGoroutineNums(v))
+			}
+			if v, ok := r.opts.Context.Value(namespaceKey{}).(string); ok {
+				opts = append(opts, consumer.WithNamespace(v))
+			}
+		}
+
 		if r.opts.ClientID != "" {
 			opts = append(opts, consumer.WithInstance(r.opts.ClientID))
 		}
@@ -315,5 +350,56 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 
 	return &rmqBroker{
 		opts: *options,
+	}
+}
+
+type groupNameKey struct{}
+type retryKey struct{}
+type concurrencyKey struct{}
+type tracingKey struct{}
+type namespaceKey struct{}
+
+func WithGroupName(name string) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, groupNameKey{}, name)
+	}
+}
+
+func WithRetry(times int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, retryKey{}, times)
+	}
+}
+
+func WithConsumeGoroutineNums(nums int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, concurrencyKey{}, nums)
+	}
+}
+
+func WithTracingEnabled(enabled bool) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, tracingKey{}, enabled)
+	}
+}
+
+func WithNamespace(ns string) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, namespaceKey{}, ns)
 	}
 }

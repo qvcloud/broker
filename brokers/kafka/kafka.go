@@ -53,13 +53,25 @@ func (k *kafkaBroker) Connect() error {
 		TLS:       k.opts.TLSConfig,
 	}
 
+	balancer := kafka.Balancer(&kafka.LeastBytes{})
+	batchSize := 0
+	if k.opts.Context != nil {
+		if v, ok := k.opts.Context.Value(balancerKey{}).(kafka.Balancer); ok {
+			balancer = v
+		}
+		if v, ok := k.opts.Context.Value(batchSizeKey{}).(int); ok {
+			batchSize = v
+		}
+	}
+
 	k.writer = &kafka.Writer{
 		Addr:     kafka.TCP(k.opts.Addrs...),
-		Balancer: &kafka.LeastBytes{},
+		Balancer: balancer,
 		Transport: &kafka.Transport{
 			Dial: dialer.DialFunc,
 			TLS:  k.opts.TLSConfig,
 		},
+		BatchSize: batchSize,
 	}
 
 	k.ctx, k.cancel = context.WithCancel(context.Background())
@@ -129,13 +141,30 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		TLS:       k.opts.TLSConfig,
 	}
 
+	minBytes := 10e3
+	maxBytes := 10e6
+	var offset int64 = 0
+
+	if k.opts.Context != nil {
+		if v, ok := k.opts.Context.Value(minBytesKey{}).(int); ok {
+			minBytes = float64(v)
+		}
+		if v, ok := k.opts.Context.Value(maxBytesKey{}).(int); ok {
+			maxBytes = float64(v)
+		}
+		if v, ok := k.opts.Context.Value(offsetKey{}).(int64); ok {
+			offset = v
+		}
+	}
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  k.opts.Addrs,
-		GroupID:  options.Queue,
-		Topic:    topic,
-		MinBytes: 10e3,
-		MaxBytes: 10e6,
-		Dialer:   dialer,
+		Brokers:     k.opts.Addrs,
+		GroupID:     options.Queue,
+		Topic:       topic,
+		MinBytes:    int(minBytes),
+		MaxBytes:    int(maxBytes),
+		Dialer:      dialer,
+		StartOffset: offset,
 	})
 
 	k.Lock()
@@ -265,5 +294,56 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	return &kafkaBroker{
 		opts:    *options,
 		readers: make(map[string]*kafka.Reader),
+	}
+}
+
+type batchSizeKey struct{}
+type balancerKey struct{}
+type minBytesKey struct{}
+type maxBytesKey struct{}
+type offsetKey struct{}
+
+func WithBatchSize(size int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, batchSizeKey{}, size)
+	}
+}
+
+func WithBalancer(balancer kafka.Balancer) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, balancerKey{}, balancer)
+	}
+}
+
+func WithMinBytes(bytes int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, minBytesKey{}, bytes)
+	}
+}
+
+func WithMaxBytes(bytes int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxBytesKey{}, bytes)
+	}
+}
+
+func WithOffset(offset int64) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, offsetKey{}, offset)
 	}
 }

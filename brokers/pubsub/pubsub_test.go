@@ -11,15 +11,15 @@ import (
 
 type mockPubSubProvider struct {
 	publishFunc func(ctx context.Context, topic string, msg *pubsub.Message) *pubsub.PublishResult
-	receiveFunc func(ctx context.Context, sub string, f func(context.Context, *pubsub.Message)) error
+	receiveFunc func(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error
 }
 
 func (m *mockPubSubProvider) Publish(ctx context.Context, topic string, msg *pubsub.Message) *pubsub.PublishResult {
 	return m.publishFunc(ctx, topic, msg)
 }
 
-func (m *mockPubSubProvider) Receive(ctx context.Context, sub string, f func(context.Context, *pubsub.Message)) error {
-	return m.receiveFunc(ctx, sub, f)
+func (m *mockPubSubProvider) Receive(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error {
+	return m.receiveFunc(ctx, sub, opts, f)
 }
 
 func (m *mockPubSubProvider) Close() error {
@@ -40,7 +40,7 @@ func TestPubSubBroker(t *testing.T) {
 	p.running = true
 
 	received := make(chan bool, 1)
-	mockProvider.receiveFunc = func(ctx context.Context, sub string, f func(context.Context, *pubsub.Message)) error {
+	mockProvider.receiveFunc = func(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error {
 		f(ctx, &pubsub.Message{
 			Data: []byte("hello"),
 		})

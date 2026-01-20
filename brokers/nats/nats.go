@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/qvcloud/broker"
@@ -55,6 +56,15 @@ func (n *natsBroker) Connect() error {
 	}
 	if n.opts.ClientID != "" {
 		opts = append(opts, nats.Name(n.opts.ClientID))
+	}
+
+	if n.opts.Context != nil {
+		if v, ok := n.opts.Context.Value(maxReconnectKey{}).(int); ok {
+			opts = append(opts, nats.MaxReconnects(v))
+		}
+		if v, ok := n.opts.Context.Value(reconnectWaitKey{}).(time.Duration); ok {
+			opts = append(opts, nats.ReconnectWait(v))
+		}
 	}
 
 	conn, err = nats.Connect(addr, opts...)
@@ -215,5 +225,26 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &natsBroker{
 		opts: *options,
+	}
+}
+
+type maxReconnectKey struct{}
+type reconnectWaitKey struct{}
+
+func WithMaxReconnect(max int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxReconnectKey{}, max)
+	}
+}
+
+func WithReconnectWait(wait time.Duration) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, reconnectWaitKey{}, wait)
 	}
 }

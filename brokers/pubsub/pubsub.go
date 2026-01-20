@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/pubsub"
 	"github.com/qvcloud/broker"
@@ -11,7 +12,7 @@ import (
 
 type pubsubProvider interface {
 	Publish(ctx context.Context, topic string, msg *pubsub.Message) *pubsub.PublishResult
-	Receive(ctx context.Context, sub string, f func(context.Context, *pubsub.Message)) error
+	Receive(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error
 	Close() error
 }
 
@@ -23,8 +24,20 @@ func (r *realPubSubProvider) Publish(ctx context.Context, topic string, msg *pub
 	return r.client.Topic(topic).Publish(ctx, msg)
 }
 
-func (r *realPubSubProvider) Receive(ctx context.Context, sub string, f func(context.Context, *pubsub.Message)) error {
-	return r.client.Subscription(sub).Receive(ctx, f)
+func (r *realPubSubProvider) Receive(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error {
+	s := r.client.Subscription(sub)
+	if opts.Context != nil {
+		if v, ok := opts.Context.Value(maxOutstandingMessagesKey{}).(int); ok {
+			s.ReceiveSettings.MaxOutstandingMessages = v
+		}
+		if v, ok := opts.Context.Value(maxOutstandingBytesKey{}).(int); ok {
+			s.ReceiveSettings.MaxOutstandingBytes = v
+		}
+		if v, ok := opts.Context.Value(maxExtensionKey{}).(time.Duration); ok {
+			s.ReceiveSettings.MaxExtension = v
+		}
+	}
+	return s.Receive(ctx, f)
 }
 
 func (r *realPubSubProvider) Close() error {
@@ -147,7 +160,7 @@ func (p *pubsubBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 	ctx, cancel := context.WithCancel(brokerCtx)
 
 	go func() {
-		err := provider.Receive(ctx, options.Queue, func(ctx context.Context, pm *pubsub.Message) {
+		err := provider.Receive(ctx, options.Queue, p.opts, func(ctx context.Context, pm *pubsub.Message) {
 			header := make(map[string]string)
 			for k, v := range pm.Attributes {
 				header[k] = v
@@ -219,5 +232,36 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &pubsubBroker{
 		opts: *options,
+	}
+}
+
+type maxOutstandingMessagesKey struct{}
+type maxOutstandingBytesKey struct{}
+type maxExtensionKey struct{}
+
+func WithMaxOutstandingMessages(n int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxOutstandingMessagesKey{}, n)
+	}
+}
+
+func WithMaxOutstandingBytes(n int) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxOutstandingBytesKey{}, n)
+	}
+}
+
+func WithMaxExtension(d time.Duration) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxExtensionKey{}, d)
 	}
 }

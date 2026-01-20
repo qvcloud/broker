@@ -165,11 +165,31 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 				continue
 			}
 
+			// Extract options
+			maxMessages := int32(10)
+			waitTime := int32(20)
+			visibilityTimeout := int32(0) // 0 means use queue default
+
+			if s.opts.Context != nil {
+				if v, ok := s.opts.Context.Value(maxNumberOfMessagesKey{}).(int32); ok {
+					maxMessages = v
+				}
+				if v, ok := s.opts.Context.Value(waitTimeSecondsKey{}).(int32); ok {
+					waitTime = v
+				}
+				if v, ok := s.opts.Context.Value(visibilityTimeoutKey{}).(int32); ok {
+					visibilityTimeout = v
+				}
+			}
+
 			input := &sqs.ReceiveMessageInput{
 				QueueUrl:              aws.String(queueUrl),
-				MaxNumberOfMessages:   10,
-				WaitTimeSeconds:       20, // Long polling
+				MaxNumberOfMessages:   maxMessages,
+				WaitTimeSeconds:       waitTime, // Long polling
 				MessageAttributeNames: []string{"All"},
+			}
+			if visibilityTimeout > 0 {
+				input.VisibilityTimeout = visibilityTimeout
 			}
 
 			output, err := s.client.ReceiveMessage(ctx, input)
@@ -259,5 +279,36 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &sqsBroker{
 		opts: *options,
+	}
+}
+
+type waitTimeSecondsKey struct{}
+type visibilityTimeoutKey struct{}
+type maxNumberOfMessagesKey struct{}
+
+func WithWaitTimeSeconds(seconds int32) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, waitTimeSecondsKey{}, seconds)
+	}
+}
+
+func WithVisibilityTimeout(seconds int32) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, visibilityTimeoutKey{}, seconds)
+	}
+}
+
+func WithMaxNumberOfMessages(num int32) broker.Option {
+	return func(o *broker.Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxNumberOfMessagesKey{}, num)
 	}
 }
