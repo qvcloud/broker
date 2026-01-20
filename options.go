@@ -32,6 +32,15 @@ type Options struct {
 
 	// Context is the underlying context for custom options.
 	Context context.Context
+
+	// Logger for debug/info logging.
+	Logger Logger
+}
+
+// Logger is a simple logging interface.
+type Logger interface {
+	Log(v ...any)
+	Logf(format string, v ...any)
 }
 
 // PublishOptions contains options for publishing a message.
@@ -100,6 +109,13 @@ func Addrs(addrs ...string) Option {
 func Codec(c Marshaler) Option {
 	return func(o *Options) {
 		o.Codec = c
+	}
+}
+
+// WithLogger sets the logger for the broker.
+func WithLogger(l Logger) Option {
+	return func(o *Options) {
+		o.Logger = l
 	}
 }
 

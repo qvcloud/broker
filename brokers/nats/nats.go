@@ -44,6 +44,9 @@ func (n *natsBroker) Connect() error {
 	addr := n.Address()
 	conn, err := nats.Connect(addr)
 	if err != nil {
+		if n.opts.Logger != nil {
+			n.opts.Logger.Logf("NATS connect error to %s: %v", addr, err)
+		}
 		return err
 	}
 	n.conn = conn
@@ -123,7 +126,9 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 			nm:      nm,
 		}
 
-		handler(context.Background(), event)
+		if err := handler(context.Background(), event); err == nil && options.AutoAck {
+			event.Ack()
+		}
 	}
 
 	if options.Queue != "" {
@@ -171,6 +176,7 @@ type natsEvent struct {
 func (e *natsEvent) Topic() string            { return e.topic }
 func (e *natsEvent) Message() *broker.Message { return e.message }
 func (e *natsEvent) Ack() error               { return e.nm.Ack() }
+func (e *natsEvent) Nack(requeue bool) error  { return e.nm.Nak() }
 func (e *natsEvent) Error() error             { return nil }
 
 func NewBroker(opts ...broker.Option) broker.Broker {

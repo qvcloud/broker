@@ -47,6 +47,9 @@ type Event interface {
 	Message() *Message
 	// Ack acknowledges the message.
 	Ack() error
+	// Nack negatively acknowledges the message.
+	// If requeue is true, the message will be returned to the queue if supported.
+	Nack(requeue bool) error
 	// Error returns any error occurred during processing.
 	Error() error
 }

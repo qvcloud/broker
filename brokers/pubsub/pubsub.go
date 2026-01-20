@@ -156,8 +156,8 @@ func (p *pubsubBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 				event.Ack()
 			}
 		})
-		if err != nil {
-			// Handle error
+		if err != nil && p.opts.Logger != nil {
+			p.opts.Logger.Logf("Pub/Sub receive error: %v", err)
 		}
 	}()
 
@@ -195,6 +195,10 @@ func (e *pubsubEvent) Topic() string            { return e.topic }
 func (e *pubsubEvent) Message() *broker.Message { return e.message }
 func (e *pubsubEvent) Ack() error {
 	e.pm.Ack()
+	return nil
+}
+func (e *pubsubEvent) Nack(requeue bool) error {
+	e.pm.Nack()
 	return nil
 }
 func (e *pubsubEvent) Error() error { return nil }

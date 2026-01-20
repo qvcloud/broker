@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -16,6 +17,7 @@ type sqsAPI interface {
 	SendMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
 	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
 	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+	ChangeMessageVisibility(ctx context.Context, params *sqs.ChangeMessageVisibilityInput, optFns ...func(*sqs.Options)) (*sqs.ChangeMessageVisibilityOutput, error)
 }
 
 type sqsBroker struct {
@@ -142,6 +144,15 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 		case <-ctx.Done():
 			return
 		default:
+			s.RLock()
+			client := s.client
+			s.RUnlock()
+
+			if client == nil {
+				time.Sleep(time.Second)
+				continue
+			}
+
 			input := &sqs.ReceiveMessageInput{
 				QueueUrl:              aws.String(queueUrl),
 				MaxNumberOfMessages:   10,
@@ -151,6 +162,7 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 
 			output, err := s.client.ReceiveMessage(ctx, input)
 			if err != nil {
+				time.Sleep(time.Second)
 				continue
 			}
 
@@ -172,6 +184,7 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 					message: msg,
 					sm:      sm,
 					client:  s.client,
+					ctx:     ctx,
 				}
 
 				if err := handler(ctx, event); err == nil && options.AutoAck {
@@ -204,14 +217,27 @@ type sqsEvent struct {
 	message *broker.Message
 	sm      types.Message
 	client  sqsAPI
+	ctx     context.Context
 }
 
 func (e *sqsEvent) Topic() string            { return e.topic }
 func (e *sqsEvent) Message() *broker.Message { return e.message }
 func (e *sqsEvent) Ack() error {
-	_, err := e.client.DeleteMessage(context.Background(), &sqs.DeleteMessageInput{
+	_, err := e.client.DeleteMessage(e.ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(e.topic),
 		ReceiptHandle: e.sm.ReceiptHandle,
+	})
+	return err
+}
+func (e *sqsEvent) Nack(requeue bool) error {
+	if !requeue {
+		return e.Ack()
+	}
+	// Make message available immediately by setting visibility timeout to 0
+	_, err := e.client.ChangeMessageVisibility(e.ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl:          aws.String(e.topic),
+		ReceiptHandle:     e.sm.ReceiptHandle,
+		VisibilityTimeout: 0,
 	})
 	return err
 }

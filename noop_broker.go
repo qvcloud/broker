@@ -61,6 +61,10 @@ func (e *noopEvent) Ack() error {
 	return nil
 }
 
+func (e *noopEvent) Nack(requeue bool) error {
+	return nil
+}
+
 func (e *noopEvent) Error() error {
 	return e.err
 }

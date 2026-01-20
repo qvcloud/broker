@@ -54,9 +54,15 @@ func (r *rmqBroker) Connect() error {
 			producer.WithRetry(2),
 		)
 		if err != nil {
+			if r.opts.Logger != nil {
+				r.opts.Logger.Logf("RocketMQ producer creation error: %v", err)
+			}
 			return err
 		}
 		if err := p.Start(); err != nil {
+			if r.opts.Logger != nil {
+				r.opts.Logger.Logf("RocketMQ producer start error: %v", err)
+			}
 			return err
 		}
 		r.producer = p
@@ -181,11 +187,17 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 			consumer.WithGroupName(groupID),
 		)
 		if err != nil {
+			if r.opts.Logger != nil {
+				r.opts.Logger.Logf("RocketMQ consumer creation error: %v", err)
+			}
 			r.Unlock()
 			return nil, err
 		}
 		r.consumer = c
 		if err := r.consumer.Start(); err != nil {
+			if r.opts.Logger != nil {
+				r.opts.Logger.Logf("RocketMQ consumer start error: %v", err)
+			}
 			r.Unlock()
 			return nil, err
 		}
@@ -211,8 +223,9 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 
 	return &rmqSubscriber{
-		topic: topic,
-		opts:  options,
+		topic:  topic,
+		opts:   options,
+		broker: r,
 	}, nil
 }
 
@@ -221,8 +234,9 @@ func (r *rmqBroker) String() string {
 }
 
 type rmqSubscriber struct {
-	topic string
-	opts  broker.SubscribeOptions
+	topic  string
+	opts   broker.SubscribeOptions
+	broker *rmqBroker
 }
 
 func (s *rmqSubscriber) Options() broker.SubscribeOptions {
@@ -234,6 +248,11 @@ func (s *rmqSubscriber) Topic() string {
 }
 
 func (s *rmqSubscriber) Unsubscribe() error {
+	s.broker.Lock()
+	defer s.broker.Unlock()
+	if s.broker.consumer != nil {
+		return s.broker.consumer.Unsubscribe(s.topic)
+	}
 	return nil
 }
 
@@ -251,6 +270,10 @@ func (e *rmqEvent) Message() *broker.Message {
 }
 
 func (e *rmqEvent) Ack() error {
+	return nil
+}
+
+func (e *rmqEvent) Nack(requeue bool) error {
 	return nil
 }
 

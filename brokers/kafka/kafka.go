@@ -120,32 +120,48 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 	k.readers[subID] = reader
 	k.Unlock()
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	go func() {
-		ctx := context.Background()
+		defer cancel()
 		for {
-			m, err := reader.ReadMessage(ctx)
-			if err != nil {
+			select {
+			case <-ctx.Done():
 				return
-			}
+			default:
+				m, err := reader.FetchMessage(ctx)
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					if k.opts.Logger != nil {
+						k.opts.Logger.Logf("Kafka fetch error: %v", err)
+					}
+					time.Sleep(time.Second)
+					continue
+				}
 
-			header := make(map[string]string)
-			for _, h := range m.Headers {
-				header[h.Key] = string(h.Value)
-			}
+				header := make(map[string]string)
+				for _, h := range m.Headers {
+					header[h.Key] = string(h.Value)
+				}
 
-			msg := &broker.Message{
-				Header: header,
-				Body:   m.Value,
-			}
+				msg := &broker.Message{
+					Header: header,
+					Body:   m.Value,
+				}
 
-			event := &kafkaEvent{
-				topic:   m.Topic,
-				message: msg,
-				reader:  reader,
-				rawMsg:  m,
-			}
+				event := &kafkaEvent{
+					topic:   m.Topic,
+					message: msg,
+					reader:  reader,
+					rawMsg:  m,
+					ctx:     ctx,
+				}
 
-			if err := handler(ctx, event); err != nil {
+				if err := handler(ctx, event); err == nil && options.AutoAck {
+					event.Ack()
+				}
 			}
 		}
 	}()
@@ -154,6 +170,7 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		topic:  topic,
 		opts:   options,
 		reader: reader,
+		cancel: cancel,
 	}, nil
 }
 
@@ -165,6 +182,7 @@ type kafkaSubscriber struct {
 	topic  string
 	opts   broker.SubscribeOptions
 	reader *kafka.Reader
+	cancel context.CancelFunc
 }
 
 func (s *kafkaSubscriber) Options() broker.SubscribeOptions {
@@ -176,6 +194,9 @@ func (s *kafkaSubscriber) Topic() string {
 }
 
 func (s *kafkaSubscriber) Unsubscribe() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	return s.reader.Close()
 }
 
@@ -184,6 +205,7 @@ type kafkaEvent struct {
 	message *broker.Message
 	reader  *kafka.Reader
 	rawMsg  kafka.Message
+	ctx     context.Context
 }
 
 func (e *kafkaEvent) Topic() string {
@@ -195,6 +217,10 @@ func (e *kafkaEvent) Message() *broker.Message {
 }
 
 func (e *kafkaEvent) Ack() error {
+	return e.reader.CommitMessages(e.ctx, e.rawMsg)
+}
+
+func (e *kafkaEvent) Nack(requeue bool) error {
 	return nil
 }
 
