@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/apache/rocketmq-client-go/v2"
+
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
@@ -97,6 +99,55 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 	rmqMsg := primitive.NewMessage(topic, msg.Body)
 	for k, v := range msg.Header {
 		rmqMsg.WithProperty(k, v)
+	}
+
+	if options.Delay > 0 {
+		// RocketMQ delay levels: 1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+		// We'll map to the closest level or just provide a helper.
+		// For now, we'll use a simple mapping for common durations.
+		level := 0
+		d := options.Delay
+		switch {
+		case d <= 1*time.Second:
+			level = 1
+		case d <= 5*time.Second:
+			level = 2
+		case d <= 10*time.Second:
+			level = 3
+		case d <= 30*time.Second:
+			level = 4
+		case d <= 1*time.Minute:
+			level = 5
+		case d <= 2*time.Minute:
+			level = 6
+		case d <= 3*time.Minute:
+			level = 7
+		case d <= 4*time.Minute:
+			level = 8
+		case d <= 5*time.Minute:
+			level = 9
+		case d <= 6*time.Minute:
+			level = 10
+		case d <= 7*time.Minute:
+			level = 11
+		case d <= 8*time.Minute:
+			level = 12
+		case d <= 9*time.Minute:
+			level = 13
+		case d <= 10*time.Minute:
+			level = 14
+		case d <= 20*time.Minute:
+			level = 15
+		case d <= 30*time.Minute:
+			level = 16
+		case d <= 1*time.Hour:
+			level = 17
+		case d <= 2*time.Hour:
+			level = 18
+		}
+		if level > 0 {
+			rmqMsg.WithDelayTimeLevel(level)
+		}
 	}
 
 	if options.ShardingKey != "" {

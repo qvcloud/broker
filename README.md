@@ -75,7 +75,36 @@ b := kafka.NewBroker(
 b.Connect()
 ```
 
-### 4. 集成 OpenTelemetry
+### 4. 使用 RabbitMQ
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/rabbitmq"
+)
+
+b := rabbitmq.NewBroker(
+    broker.Addrs("amqp://guest:guest@localhost:5672/"),
+)
+b.Connect()
+```
+
+### 5. 使用 NATS
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/nats"
+)
+
+b := nats.NewBroker(
+    broker.Addrs("nats://localhost:4222"),
+)
+b.Connect()
+```
+
+### 6. 集成 OpenTelemetry
+
 
 ```go
 import (

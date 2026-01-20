@@ -3,8 +3,10 @@ package broker
 import (
 	"context"
 	"crypto/tls"
+	"time"
 
 	"go.opentelemetry.io/otel/metric"
+
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -38,6 +40,8 @@ type PublishOptions struct {
 	Context context.Context
 	// ShardingKey is the key used for sharding/partitioning.
 	ShardingKey string
+	// Delay is the delay duration for the message.
+	Delay time.Duration
 }
 
 // SubscribeOptions contains options for subscribing to a topic.
@@ -46,6 +50,8 @@ type SubscribeOptions struct {
 	AutoAck bool
 	// Queue is the consumer group name or queue name.
 	Queue string
+	// DeadLetterQueue is the name of the dead letter queue.
+	DeadLetterQueue string
 
 	// Context is the context for the subscribe operation.
 	Context context.Context
@@ -158,6 +164,21 @@ func PublishContext(ctx context.Context) PublishOption {
 func WithShardingKey(v string) PublishOption {
 	return func(o *PublishOptions) {
 		o.ShardingKey = v
+	}
+}
+
+// WithDelay sets the delay duration for a publish operation.
+func WithDelay(d time.Duration) PublishOption {
+	return func(o *PublishOptions) {
+		o.Delay = d
+	}
+}
+
+// WithDeadLetterQueue sets the dead letter queue name.
+
+func WithDeadLetterQueue(v string) SubscribeOption {
+	return func(o *SubscribeOptions) {
+		o.DeadLetterQueue = v
 	}
 }
 
