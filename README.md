@@ -5,7 +5,7 @@ Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提�
 ## 核心特性
 
 - **接口驱动**: 统一的 `Broker`, `Publisher`, `Subscriber` 接口。
-- **多驱动支持**: 计划支持 RocketMQ, Kafka, NATS, RabbitMQ, AWS SQS, GCP Pub/Sub 等。
+- **多驱动支持**: 已支持 RocketMQ, Kafka, NATS, RabbitMQ, AWS SQS, GCP Pub/Sub。
 - **可扩展性**: 插件化架构，轻松接入新的 MQ 实现。
 - **统一模型**: 厂商无关的消息模型。
 
