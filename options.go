@@ -182,6 +182,13 @@ func WithDeadLetterQueue(v string) SubscribeOption {
 	}
 }
 
+// WithQueue sets the name of the queue or consumer group.
+func WithQueue(name string) SubscribeOption {
+	return func(o *SubscribeOptions) {
+		o.Queue = name
+	}
+}
+
 // SubscribeContext set context.
 func SubscribeContext(ctx context.Context) SubscribeOption {
 	return func(o *SubscribeOptions) {

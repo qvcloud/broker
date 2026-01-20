@@ -103,7 +103,41 @@ b := nats.NewBroker(
 b.Connect()
 ```
 
-### 6. 集成 OpenTelemetry
+### 6. 使用 AWS SQS
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/sqs"
+)
+
+// SQS 使用 AWS 默认配置加载凭证和区域
+b := sqs.NewBroker()
+b.Connect()
+
+// 发布到指定 Queue URL
+b.Publish(ctx, "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue", msg)
+```
+
+### 7. 使用 GCP Pub/Sub
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/pubsub"
+)
+
+// Addrs 传入 GCP Project ID
+b := pubsub.NewBroker(
+    broker.Addrs("my-gcp-project-id"),
+)
+b.Connect()
+
+// 订阅时需通过 WithQueue 指定 Subscription ID
+b.Subscribe("my-topic", handler, broker.WithQueue("my-subscription"))
+```
+
+### 8. 集成 OpenTelemetry
 
 
 ```go
