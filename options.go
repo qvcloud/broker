@@ -54,6 +54,8 @@ type PublishOptions struct {
 	ShardingKey string
 	// Delay is the delay duration for the message.
 	Delay time.Duration
+	// Tags are labels for the message (e.g. for filtering).
+	Tags []string
 }
 
 // SubscribeOptions contains options for subscribing to a topic.
@@ -197,6 +199,12 @@ func WithShardingKey(v string) PublishOption {
 func WithDelay(d time.Duration) PublishOption {
 	return func(o *PublishOptions) {
 		o.Delay = d
+	}
+}
+
+func WithTags(tags ...string) PublishOption {
+	return func(o *PublishOptions) {
+		o.Tags = tags
 	}
 }
 

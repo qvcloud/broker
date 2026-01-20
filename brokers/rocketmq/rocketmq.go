@@ -58,18 +58,20 @@ func (r *rmqBroker) Connect() error {
 		// Extract custom options from Context
 		retry := 2
 		if r.opts.Context != nil {
-			if v, ok := r.opts.Context.Value(retryKey{}).(int); ok {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, retryKey{}).(int); ok {
 				retry = v
 			}
-			if v, ok := r.opts.Context.Value(groupNameKey{}).(string); ok {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, groupNameKey{}).(string); ok {
 				opts = append(opts, producer.WithGroupName(v))
 			}
-			if v, ok := r.opts.Context.Value(namespaceKey{}).(string); ok {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok {
 				opts = append(opts, producer.WithNamespace(v))
 			}
-			if v, ok := r.opts.Context.Value(tracingKey{}).(bool); ok && v {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok && v {
 				opts = append(opts, producer.WithTrace(&primitive.TraceConfig{}))
 			}
+			// Acknowledge options used elsewhere
+			broker.GetTrackedValue(r.opts.Context, concurrencyKey{})
 		}
 		opts = append(opts, producer.WithRetry(retry))
 
@@ -94,6 +96,8 @@ func (r *rmqBroker) Connect() error {
 
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
+
+	broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
 	return nil
 }
 
@@ -133,7 +137,16 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 
 	rmqMsg := primitive.NewMessage(topic, msg.Body)
 	for k, v := range msg.Header {
-		rmqMsg.WithProperty(k, v)
+		switch k {
+		case "KEYS":
+			rmqMsg.WithKeys([]string{v})
+		case "SHARDING_KEY":
+			if options.ShardingKey == "" {
+				options.ShardingKey = v
+			}
+		default:
+			rmqMsg.WithProperty(k, v)
+		}
 	}
 
 	if options.Delay > 0 {
@@ -185,8 +198,40 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		}
 	}
 
+	// Precedence: rocketmq.WithShardingKey > broker.WithShardingKey
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, shardingKey{}).(string); ok {
+			options.ShardingKey = v
+		}
+	}
 	if options.ShardingKey != "" {
 		rmqMsg.WithShardingKey(options.ShardingKey)
+	}
+
+	// Handle tags
+	if len(options.Tags) > 0 {
+		rmqMsg.WithTag(options.Tags[0])
+	}
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, tagKey{}).(string); ok {
+			rmqMsg.WithTag(v)
+		}
+	}
+
+	// Handle Async
+	async := false
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, asyncKey{}).(bool); ok {
+			async = v
+		}
+	}
+
+	if async {
+		return r.producer.SendAsync(ctx, func(ctx context.Context, res *primitive.SendResult, err error) {
+			if err != nil && r.opts.Logger != nil {
+				r.opts.Logger.Logf("RocketMQ async send error: %v", err)
+			}
+		}, rmqMsg)
 	}
 
 	res, err := r.producer.SendSync(ctx, rmqMsg)
@@ -198,6 +243,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		return fmt.Errorf("send failed: %s", res.String())
 	}
 
+	broker.WarnUnconsumed(options.Context, r.opts.Logger)
 	return nil
 }
 
@@ -225,10 +271,10 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		}
 
 		if r.opts.Context != nil {
-			if v, ok := r.opts.Context.Value(concurrencyKey{}).(int); ok {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, concurrencyKey{}).(int); ok {
 				opts = append(opts, consumer.WithConsumeGoroutineNums(v))
 			}
-			if v, ok := r.opts.Context.Value(namespaceKey{}).(string); ok {
+			if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok {
 				opts = append(opts, consumer.WithNamespace(v))
 			}
 		}
@@ -358,48 +404,55 @@ type retryKey struct{}
 type concurrencyKey struct{}
 type tracingKey struct{}
 type namespaceKey struct{}
+type shardingKey struct{}
 
 func WithGroupName(name string) broker.Option {
 	return func(o *broker.Options) {
-		if o.Context == nil {
-			o.Context = context.Background()
-		}
-		o.Context = context.WithValue(o.Context, groupNameKey{}, name)
+		o.Context = broker.WithTrackedValue(o.Context, groupNameKey{}, name, "rocketmq.WithGroupName")
 	}
 }
 
 func WithRetry(times int) broker.Option {
 	return func(o *broker.Options) {
-		if o.Context == nil {
-			o.Context = context.Background()
-		}
-		o.Context = context.WithValue(o.Context, retryKey{}, times)
+		o.Context = broker.WithTrackedValue(o.Context, retryKey{}, times, "rocketmq.WithRetry")
 	}
 }
 
 func WithConsumeGoroutineNums(nums int) broker.Option {
 	return func(o *broker.Options) {
-		if o.Context == nil {
-			o.Context = context.Background()
-		}
-		o.Context = context.WithValue(o.Context, concurrencyKey{}, nums)
+		o.Context = broker.WithTrackedValue(o.Context, concurrencyKey{}, nums, "rocketmq.WithConsumeGoroutineNums")
 	}
 }
 
 func WithTracingEnabled(enabled bool) broker.Option {
 	return func(o *broker.Options) {
-		if o.Context == nil {
-			o.Context = context.Background()
-		}
-		o.Context = context.WithValue(o.Context, tracingKey{}, enabled)
+		o.Context = broker.WithTrackedValue(o.Context, tracingKey{}, enabled, "rocketmq.WithTracingEnabled")
 	}
 }
 
 func WithNamespace(ns string) broker.Option {
 	return func(o *broker.Options) {
-		if o.Context == nil {
-			o.Context = context.Background()
-		}
-		o.Context = context.WithValue(o.Context, namespaceKey{}, ns)
+		o.Context = broker.WithTrackedValue(o.Context, namespaceKey{}, ns, "rocketmq.WithNamespace")
+	}
+}
+
+type asyncKey struct{}
+type tagKey struct{}
+
+func WithAsync() broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		o.Context = broker.WithTrackedValue(o.Context, asyncKey{}, true, "rocketmq.WithAsync")
+	}
+}
+
+func WithTag(tag string) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		o.Context = broker.WithTrackedValue(o.Context, tagKey{}, tag, "rocketmq.WithTag")
+	}
+}
+
+func WithShardingKey(key string) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		o.Context = broker.WithTrackedValue(o.Context, shardingKey{}, key, "rocketmq.WithShardingKey")
 	}
 }

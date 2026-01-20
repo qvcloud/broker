@@ -62,6 +62,10 @@ func (s *sqsBroker) Connect() error {
 	s.client = sqs.NewFromConfig(cfg)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.running = true
+
+	// Warn about unconsumed options
+	broker.WarnUnconsumed(s.opts.Context, s.opts.Logger)
+
 	return nil
 }
 
@@ -110,6 +114,16 @@ func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		input.DelaySeconds = int32(options.Delay.Seconds())
 	}
 
+	if options.ShardingKey != "" {
+		input.MessageGroupId = aws.String(options.ShardingKey)
+	}
+
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, deduplicationIdKey{}).(string); ok {
+			input.MessageDeduplicationId = aws.String(v)
+		}
+	}
+
 	for k, v := range msg.Header {
 		input.MessageAttributes[k] = types.MessageAttributeValue{
 			DataType:    aws.String("String"),
@@ -118,6 +132,9 @@ func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 	}
 
 	_, err := client.SendMessage(ctx, input)
+	if err == nil {
+		broker.WarnUnconsumed(options.Context, s.opts.Logger)
+	}
 	return err
 }
 
@@ -171,13 +188,13 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 			visibilityTimeout := int32(0) // 0 means use queue default
 
 			if s.opts.Context != nil {
-				if v, ok := s.opts.Context.Value(maxNumberOfMessagesKey{}).(int32); ok {
+				if v, ok := broker.GetTrackedValue(s.opts.Context, maxNumberOfMessagesKey{}).(int32); ok {
 					maxMessages = v
 				}
-				if v, ok := s.opts.Context.Value(waitTimeSecondsKey{}).(int32); ok {
+				if v, ok := broker.GetTrackedValue(s.opts.Context, waitTimeSecondsKey{}).(int32); ok {
 					waitTime = v
 				}
-				if v, ok := s.opts.Context.Value(visibilityTimeoutKey{}).(int32); ok {
+				if v, ok := broker.GetTrackedValue(s.opts.Context, visibilityTimeoutKey{}).(int32); ok {
 					visibilityTimeout = v
 				}
 			}
@@ -291,7 +308,7 @@ func WithWaitTimeSeconds(seconds int32) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, waitTimeSecondsKey{}, seconds)
+		o.Context = broker.WithTrackedValue(o.Context, waitTimeSecondsKey{}, seconds, "sqs.WithWaitTimeSeconds")
 	}
 }
 
@@ -300,7 +317,7 @@ func WithVisibilityTimeout(seconds int32) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, visibilityTimeoutKey{}, seconds)
+		o.Context = broker.WithTrackedValue(o.Context, visibilityTimeoutKey{}, seconds, "sqs.WithVisibilityTimeout")
 	}
 }
 
@@ -309,6 +326,17 @@ func WithMaxNumberOfMessages(num int32) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxNumberOfMessagesKey{}, num)
+		o.Context = broker.WithTrackedValue(o.Context, maxNumberOfMessagesKey{}, num, "sqs.WithMaxNumberOfMessages")
+	}
+}
+
+type deduplicationIdKey struct{}
+
+func WithDeduplicationId(id string) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = broker.WithTrackedValue(o.Context, deduplicationIdKey{}, id, "sqs.WithDeduplicationId")
 	}
 }

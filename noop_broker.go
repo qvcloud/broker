@@ -73,6 +73,7 @@ type noopBroker struct {
 	opts *Options
 	sync.RWMutex
 	Subscribers map[string][]*noopSubscriber
+	connected   bool
 }
 
 func (b *noopBroker) Options() Options {
@@ -84,10 +85,17 @@ func (b *noopBroker) Address() string {
 }
 
 func (b *noopBroker) Connect() error {
+	b.Lock()
+	defer b.Unlock()
+	b.connected = true
+	WarnUnconsumed(b.opts.Context, b.opts.Logger)
 	return nil
 }
 
 func (b *noopBroker) Disconnect() error {
+	b.Lock()
+	defer b.Unlock()
+	b.connected = false
 	return nil
 }
 
@@ -103,6 +111,14 @@ func (b *noopBroker) String() string {
 }
 
 func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, opts ...PublishOption) error {
+	options := PublishOptions{
+		Context: ctx,
+	}
+	for _, o := range opts {
+		o(&options)
+	}
+	WarnUnconsumed(options.Context, b.opts.Logger)
+
 	if b.opts.Tracer != nil {
 		var span trace.Span
 		ctx, span = b.opts.Tracer.Start(ctx, "broker.publish",

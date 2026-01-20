@@ -57,6 +57,10 @@ As an SRE, I want to see metrics and traces for every message sent/received so t
 - **FR-003**: System MUST allow configuring brokers using Functional Options.
 - **FR-004**: System MUST implement a `JsonMarshaler` as the default codec.
 - **FR-005**: System MUST provide at least three production-ready adapters: RocketMQ, Kafka, and NATS.
+- **FR-006**: System SHOULD log a warning when an unsupported or mismatched platform-specific Option is provided to an adapter.
+- **FR-007**: Platform-specific options MUST take precedence over generic (Global) options if both provide the same logical parameter.
+- **FR-008**: Async publishing (`WithAsync`) MUST only be truly asynchronous if the underlying driver/SDK supports it natively; otherwise, it should fallback to synchronous execution with a warning.
+- **FR-009**: Broker implementation SHOULD use "Late Binding"; `NewBroker` should only validate configuration, while actual resource initialization and connection verification MUST happen in `Connect()`.
 
 ### Key Entities
 
@@ -71,3 +75,14 @@ As an SRE, I want to see metrics and traces for every message sent/received so t
 - **SC-001**: API overhead < 5% compared to native SDKs.
 - **SC-002**: Zero business logic changes required when switching between RocketMQ and Kafka via configuration.
 - **SC-003**: 100% test coverage for core interfaces and at least 80% for each adapter.
+
+
+## Clarifications
+
+### Session 2026-01-20
+
+- Q: 跨平台 Option 冲突处理策略 → A: Logger 警告 (如果注入了 broker.Logger，则在检测到不支持的 Option 时输出警告日志)。
+- Q: 参数冲突优先级 → A: 特定覆盖通用 (适配器特定 Option 始终覆盖通用的 Global Option)。
+- Q: 发布异步行为的一致性 → A: 仅限特定驱动 (只有原生支持异步的驱动，如 RocketMQ，才处理 WithAsync 参数，其他驱动应遵循 FR-006 逻辑进行警告并同步发送)。
+- Q: 驱动初始化失败的回退策略 → A: Late Binding (NewBroker 仅校验参数，连接与初始化错误在 Connect() 时返回)。
+- Q: 消息 Body 序列化的透明度 → A: 智能透传 ([]byte 类型默认不处理，非 []byte 类型且配置了序列化器时才执行转换)。

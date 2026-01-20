@@ -59,10 +59,10 @@ func (n *natsBroker) Connect() error {
 	}
 
 	if n.opts.Context != nil {
-		if v, ok := n.opts.Context.Value(maxReconnectKey{}).(int); ok {
+		if v, ok := broker.GetTrackedValue(n.opts.Context, maxReconnectKey{}).(int); ok {
 			opts = append(opts, nats.MaxReconnects(v))
 		}
-		if v, ok := n.opts.Context.Value(reconnectWaitKey{}).(time.Duration); ok {
+		if v, ok := broker.GetTrackedValue(n.opts.Context, reconnectWaitKey{}).(time.Duration); ok {
 			opts = append(opts, nats.ReconnectWait(v))
 		}
 	}
@@ -78,6 +78,10 @@ func (n *natsBroker) Connect() error {
 
 	n.ctx, n.cancel = context.WithCancel(context.Background())
 	n.running = true
+
+	// Warn about unconsumed options
+	broker.WarnUnconsumed(n.opts.Context, n.opts.Logger)
+
 	return nil
 }
 
@@ -102,6 +106,13 @@ func (n *natsBroker) Disconnect() error {
 }
 
 func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+	options := broker.PublishOptions{
+		Context: ctx,
+	}
+	for _, o := range opts {
+		o(&options)
+	}
+
 	n.RLock()
 	conn := n.conn
 	n.RUnlock()
@@ -116,11 +127,21 @@ func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Mess
 		Data:    msg.Body,
 	}
 
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, replyToKey{}).(string); ok {
+			nm.Reply = v
+		}
+	}
+
 	for k, v := range msg.Header {
 		nm.Header.Set(k, v)
 	}
 
-	return conn.PublishMsg(nm)
+	err := conn.PublishMsg(nm)
+	if err == nil {
+		broker.WarnUnconsumed(options.Context, n.opts.Logger)
+	}
+	return err
 }
 
 func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
@@ -236,7 +257,7 @@ func WithMaxReconnect(max int) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxReconnectKey{}, max)
+		o.Context = broker.WithTrackedValue(o.Context, maxReconnectKey{}, max, "nats.WithMaxReconnect")
 	}
 }
 
@@ -245,6 +266,17 @@ func WithReconnectWait(wait time.Duration) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, reconnectWaitKey{}, wait)
+		o.Context = broker.WithTrackedValue(o.Context, reconnectWaitKey{}, wait, "nats.WithReconnectWait")
+	}
+}
+
+type replyToKey struct{}
+
+func WithReplyTo(reply string) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = broker.WithTrackedValue(o.Context, replyToKey{}, reply, "nats.WithReplyTo")
 	}
 }

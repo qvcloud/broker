@@ -27,13 +27,13 @@ func (r *realPubSubProvider) Publish(ctx context.Context, topic string, msg *pub
 func (r *realPubSubProvider) Receive(ctx context.Context, sub string, opts broker.Options, f func(context.Context, *pubsub.Message)) error {
 	s := r.client.Subscription(sub)
 	if opts.Context != nil {
-		if v, ok := opts.Context.Value(maxOutstandingMessagesKey{}).(int); ok {
+		if v, ok := broker.GetTrackedValue(opts.Context, maxOutstandingMessagesKey{}).(int); ok {
 			s.ReceiveSettings.MaxOutstandingMessages = v
 		}
-		if v, ok := opts.Context.Value(maxOutstandingBytesKey{}).(int); ok {
+		if v, ok := broker.GetTrackedValue(opts.Context, maxOutstandingBytesKey{}).(int); ok {
 			s.ReceiveSettings.MaxOutstandingBytes = v
 		}
-		if v, ok := opts.Context.Value(maxExtensionKey{}).(time.Duration); ok {
+		if v, ok := broker.GetTrackedValue(opts.Context, maxExtensionKey{}).(time.Duration); ok {
 			s.ReceiveSettings.MaxExtension = v
 		}
 	}
@@ -91,6 +91,10 @@ func (p *pubsubBroker) Connect() error {
 	p.provider = &realPubSubProvider{client: client}
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.running = true
+
+	// Warn about unconsumed options
+	broker.WarnUnconsumed(p.opts.Context, p.opts.Logger)
+
 	return nil
 }
 
@@ -115,6 +119,13 @@ func (p *pubsubBroker) Disconnect() error {
 }
 
 func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+	options := broker.PublishOptions{
+		Context: ctx,
+	}
+	for _, o := range opts {
+		o(&options)
+	}
+
 	p.RLock()
 	provider := p.provider
 	p.RUnlock()
@@ -134,6 +145,9 @@ func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Me
 	})
 
 	_, err := res.Get(ctx)
+	if err == nil {
+		broker.WarnUnconsumed(options.Context, p.opts.Logger)
+	}
 	return err
 }
 
@@ -244,7 +258,7 @@ func WithMaxOutstandingMessages(n int) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxOutstandingMessagesKey{}, n)
+		o.Context = broker.WithTrackedValue(o.Context, maxOutstandingMessagesKey{}, n, "pubsub.WithMaxOutstandingMessages")
 	}
 }
 
@@ -253,7 +267,7 @@ func WithMaxOutstandingBytes(n int) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxOutstandingBytesKey{}, n)
+		o.Context = broker.WithTrackedValue(o.Context, maxOutstandingBytesKey{}, n, "pubsub.WithMaxOutstandingBytes")
 	}
 }
 
@@ -262,6 +276,6 @@ func WithMaxExtension(d time.Duration) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxExtensionKey{}, d)
+		o.Context = broker.WithTrackedValue(o.Context, maxExtensionKey{}, d, "pubsub.WithMaxExtension")
 	}
 }

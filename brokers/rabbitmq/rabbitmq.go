@@ -72,6 +72,9 @@ func (r *rmqBroker) Connect() error {
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
 
+	// Warn about unconsumed options at connection time
+	broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
+
 	// Handle reconnection
 	go func() {
 		for {
@@ -160,21 +163,43 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 
 	exchange := ""
 	if r.opts.Context != nil {
-		if v, ok := r.opts.Context.Value(exchangeKey{}).(string); ok {
+		if v, ok := broker.GetTrackedValue(r.opts.Context, exchangeKey{}).(string); ok {
 			exchange = v
 		}
 	}
 
+	priority := uint8(0)
+	deliveryMode := amqp.Transient
+	mandatory := false
+
+	if options.Context != nil {
+		if v, ok := broker.GetTrackedValue(options.Context, priorityKey{}).(int); ok {
+			priority = uint8(v)
+		}
+		if v, ok := broker.GetTrackedValue(options.Context, persistentKey{}).(bool); ok && v {
+			deliveryMode = amqp.Persistent
+		}
+		if v, ok := broker.GetTrackedValue(options.Context, mandatoryKey{}).(bool); ok {
+			mandatory = v
+		}
+	}
+
 	err := ch.PublishWithContext(ctx,
-		exchange, // exchange
-		topic,    // routing key
-		false,    // mandatory
-		false,    // immediate
+		exchange,  // exchange
+		topic,     // routing key
+		mandatory, // mandatory
+		false,     // immediate
 		amqp.Publishing{
-			Headers:     amqp.Table(headers),
-			ContentType: "application/octet-stream",
-			Body:        msg.Body,
+			Headers:      amqp.Table(headers),
+			ContentType:  "application/octet-stream",
+			Body:         msg.Body,
+			Priority:     priority,
+			DeliveryMode: deliveryMode,
 		})
+
+	if err == nil {
+		broker.WarnUnconsumed(options.Context, r.opts.Logger)
+	}
 
 	return err
 }
@@ -230,19 +255,19 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			exchangeType := "direct"
 
 			if r.opts.Context != nil {
-				if v, ok := r.opts.Context.Value(durableKey{}).(bool); ok {
+				if v, ok := broker.GetTrackedValue(r.opts.Context, durableKey{}).(bool); ok {
 					durable = v
 				}
-				if v, ok := r.opts.Context.Value(autoDeleteKey{}).(bool); ok {
+				if v, ok := broker.GetTrackedValue(r.opts.Context, autoDeleteKey{}).(bool); ok {
 					autoDelete = v
 				}
-				if v, ok := r.opts.Context.Value(prefetchCountKey{}).(int); ok {
+				if v, ok := broker.GetTrackedValue(r.opts.Context, prefetchCountKey{}).(int); ok {
 					prefetchCount = v
 				}
-				if v, ok := r.opts.Context.Value(exchangeKey{}).(string); ok {
+				if v, ok := broker.GetTrackedValue(r.opts.Context, exchangeKey{}).(string); ok {
 					exchange = v
 				}
-				if v, ok := r.opts.Context.Value(exchangeTypeKey{}).(string); ok {
+				if v, ok := broker.GetTrackedValue(r.opts.Context, exchangeTypeKey{}).(string); ok {
 					exchangeType = v
 				}
 			}
@@ -375,7 +400,7 @@ func WithExchange(name string) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, exchangeKey{}, name)
+		o.Context = broker.WithTrackedValue(o.Context, exchangeKey{}, name, "rabbitmq.WithExchange")
 	}
 }
 
@@ -384,7 +409,7 @@ func WithExchangeType(kind string) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, exchangeTypeKey{}, kind)
+		o.Context = broker.WithTrackedValue(o.Context, exchangeTypeKey{}, kind, "rabbitmq.WithExchangeType")
 	}
 }
 
@@ -393,7 +418,7 @@ func WithPrefetchCount(count int) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, prefetchCountKey{}, count)
+		o.Context = broker.WithTrackedValue(o.Context, prefetchCountKey{}, count, "rabbitmq.WithPrefetchCount")
 	}
 }
 
@@ -402,7 +427,7 @@ func WithDurable(durable bool) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, durableKey{}, durable)
+		o.Context = broker.WithTrackedValue(o.Context, durableKey{}, durable, "rabbitmq.WithDurable")
 	}
 }
 
@@ -411,7 +436,38 @@ func WithAutoDelete(autoDelete bool) broker.Option {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, autoDeleteKey{}, autoDelete)
+		o.Context = broker.WithTrackedValue(o.Context, autoDeleteKey{}, autoDelete, "rabbitmq.WithAutoDelete")
+	}
+}
+
+type priorityKey struct{}
+type persistentKey struct{}
+type mandatoryKey struct{}
+
+func WithPriority(p int) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = broker.WithTrackedValue(o.Context, priorityKey{}, p, "rabbitmq.WithPriority")
+	}
+}
+
+func WithPersistent(p bool) broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = broker.WithTrackedValue(o.Context, persistentKey{}, p, "rabbitmq.WithPersistent")
+	}
+}
+
+func WithMandatory() broker.PublishOption {
+	return func(o *broker.PublishOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = broker.WithTrackedValue(o.Context, mandatoryKey{}, true, "rabbitmq.WithMandatory")
 	}
 }
 

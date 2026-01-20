@@ -2,18 +2,21 @@ package broker
 
 import (
 	"context"
+	"sync"
 )
 
 // Broker is an interface used for asynchronous messaging.
 // It provides a unified API to interact with different message brokers.
 type Broker interface {
 	// Init initializes the broker with options.
+	// It should only validate configuration and not establish network connections.
 	Init(...Option) error
 	// Options returns the broker options.
 	Options() Options
 	// Address returns the broker address.
 	Address() string
 	// Connect connects the broker to the message service.
+	// All network initialization and client creation should happen here.
 	Connect() error
 	// Disconnect disconnects the broker from the message service.
 	Disconnect() error
@@ -70,4 +73,67 @@ type Marshaler interface {
 	Marshal(interface{}) ([]byte, error)
 	Unmarshal([]byte, interface{}) error
 	String() string
+}
+
+type trackerKey struct{}
+
+// OptionTracker tracks which options have been registered and consumed.
+type OptionTracker struct {
+	mu         sync.Mutex
+	registered map[any]string
+	consumed   map[any]struct{}
+}
+
+// WithTrackedValue adds a value to the context and registers it for tracking.
+func WithTrackedValue(ctx context.Context, key, val any, name string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tracker, ok := ctx.Value(trackerKey{}).(*OptionTracker)
+	if !ok {
+		tracker = &OptionTracker{
+			registered: make(map[any]string),
+			consumed:   make(map[any]struct{}),
+		}
+		ctx = context.WithValue(ctx, trackerKey{}, tracker)
+	}
+	tracker.mu.Lock()
+	tracker.registered[key] = name
+	tracker.mu.Unlock()
+	return context.WithValue(ctx, key, val)
+}
+
+// GetTrackedValue retrieves a value from the context and marks it as consumed.
+func GetTrackedValue(ctx context.Context, key any) any {
+	if ctx == nil {
+		return nil
+	}
+	val := ctx.Value(key)
+	if val != nil {
+		if tracker, ok := ctx.Value(trackerKey{}).(*OptionTracker); ok {
+			tracker.mu.Lock()
+			tracker.consumed[key] = struct{}{}
+			tracker.mu.Unlock()
+		}
+	}
+	return val
+}
+
+// WarnUnconsumed logs a warning if any registered options were not consumed.
+func WarnUnconsumed(ctx context.Context, logger Logger) {
+	if ctx == nil || logger == nil {
+		return
+	}
+	tracker, ok := ctx.Value(trackerKey{}).(*OptionTracker)
+	if !ok {
+		return
+	}
+
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	for key, name := range tracker.registered {
+		if _, consumed := tracker.consumed[key]; !consumed {
+			logger.Logf("Warning: option %q was ignored by the implementation", name)
+		}
+	}
 }
