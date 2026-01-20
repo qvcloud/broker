@@ -15,6 +15,8 @@ type natsBroker struct {
 
 	sync.RWMutex
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (n *natsBroker) Options() broker.Options { return n.opts }
@@ -42,7 +44,17 @@ func (n *natsBroker) Connect() error {
 	}
 
 	addr := n.Address()
-	conn, err := nats.Connect(addr)
+	var (
+		conn *nats.Conn
+		err  error
+	)
+
+	opts := []nats.Option{}
+	if n.opts.TLSConfig != nil {
+		opts = append(opts, nats.Secure(n.opts.TLSConfig))
+	}
+
+	conn, err = nats.Connect(addr, opts...)
 	if err != nil {
 		if n.opts.Logger != nil {
 			n.opts.Logger.Logf("NATS connect error to %s: %v", addr, err)
@@ -51,6 +63,7 @@ func (n *natsBroker) Connect() error {
 	}
 	n.conn = conn
 
+	n.ctx, n.cancel = context.WithCancel(context.Background())
 	n.running = true
 	return nil
 }
@@ -61,6 +74,10 @@ func (n *natsBroker) Disconnect() error {
 
 	if !n.running {
 		return nil
+	}
+
+	if n.cancel != nil {
+		n.cancel()
 	}
 
 	if n.conn != nil {
@@ -98,11 +115,18 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 
 	n.Lock()
 	conn := n.conn
+	brokerCtx := n.ctx
 	n.Unlock()
 
 	if conn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
+
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(brokerCtx)
 
 	var sub *nats.Subscription
 	var err error
@@ -126,7 +150,7 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 			nm:      nm,
 		}
 
-		if err := handler(context.Background(), event); err == nil && options.AutoAck {
+		if err := handler(ctx, event); err == nil && options.AutoAck {
 			event.Ack()
 		}
 	}
@@ -142,9 +166,10 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 	}
 
 	return &natsSubscriber{
-		topic: topic,
-		opts:  options,
-		sub:   sub,
+		topic:  topic,
+		opts:   options,
+		sub:    sub,
+		cancel: cancel,
 	}, nil
 }
 
@@ -153,14 +178,18 @@ func (n *natsBroker) String() string {
 }
 
 type natsSubscriber struct {
-	topic string
-	opts  broker.SubscribeOptions
-	sub   *nats.Subscription
+	topic  string
+	opts   broker.SubscribeOptions
+	sub    *nats.Subscription
+	cancel context.CancelFunc
 }
 
 func (s *natsSubscriber) Options() broker.SubscribeOptions { return s.opts }
 func (s *natsSubscriber) Topic() string                    { return s.topic }
 func (s *natsSubscriber) Unsubscribe() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.sub != nil {
 		return s.sub.Unsubscribe()
 	}

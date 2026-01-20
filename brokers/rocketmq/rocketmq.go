@@ -22,6 +22,8 @@ type rmqBroker struct {
 
 	sync.RWMutex
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (r *rmqBroker) Options() broker.Options { return r.opts }
@@ -68,6 +70,7 @@ func (r *rmqBroker) Connect() error {
 		r.producer = p
 	}
 
+	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
 	return nil
 }
@@ -78,6 +81,10 @@ func (r *rmqBroker) Disconnect() error {
 
 	if !r.running {
 		return nil
+	}
+
+	if r.cancel != nil {
+		r.cancel()
 	}
 
 	if r.producer != nil {
@@ -181,6 +188,7 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 
 	r.Lock()
+	brokerCtx := r.ctx
 	if r.consumer == nil {
 		c, err := rocketmq.NewPushConsumer(
 			consumer.WithNameServer(r.opts.Addrs),
@@ -204,7 +212,13 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 	r.Unlock()
 
-	err := r.consumer.Subscribe(topic, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(brokerCtx)
+
+	err := r.consumer.Subscribe(topic, consumer.MessageSelector{}, func(consumeCtx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
 		for _, m := range msgs {
 			msg := &broker.Message{
 				Header: m.GetProperties(),
@@ -219,6 +233,7 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	})
 
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -226,6 +241,7 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		topic:  topic,
 		opts:   options,
 		broker: r,
+		cancel: cancel,
 	}, nil
 }
 
@@ -237,6 +253,7 @@ type rmqSubscriber struct {
 	topic  string
 	opts   broker.SubscribeOptions
 	broker *rmqBroker
+	cancel context.CancelFunc
 }
 
 func (s *rmqSubscriber) Options() broker.SubscribeOptions {
@@ -248,6 +265,9 @@ func (s *rmqSubscriber) Topic() string {
 }
 
 func (s *rmqSubscriber) Unsubscribe() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	s.broker.Lock()
 	defer s.broker.Unlock()
 	if s.broker.consumer != nil {

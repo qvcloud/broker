@@ -37,6 +37,8 @@ type pubsubBroker struct {
 
 	sync.RWMutex
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (p *pubsubBroker) Options() broker.Options { return p.opts }
@@ -74,6 +76,7 @@ func (p *pubsubBroker) Connect() error {
 	}
 
 	p.provider = &realPubSubProvider{client: client}
+	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.running = true
 	return nil
 }
@@ -84,6 +87,10 @@ func (p *pubsubBroker) Disconnect() error {
 
 	if !p.running {
 		return nil
+	}
+
+	if p.cancel != nil {
+		p.cancel()
 	}
 
 	if p.provider != nil {
@@ -122,17 +129,22 @@ func (p *pubsubBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 
 	p.RLock()
 	provider := p.provider
+	brokerCtx := p.ctx
 	p.RUnlock()
 
 	if provider == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
 	if options.Queue == "" {
 		return nil, fmt.Errorf("subscription ID must be provided in Queue option")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(brokerCtx)
 
 	go func() {
 		err := provider.Receive(ctx, options.Queue, func(ctx context.Context, pm *pubsub.Message) {

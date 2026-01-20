@@ -18,6 +18,8 @@ type kafkaBroker struct {
 	sync.RWMutex
 	readers map[string]*kafka.Reader
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (k *kafkaBroker) Options() broker.Options { return k.opts }
@@ -44,11 +46,22 @@ func (k *kafkaBroker) Connect() error {
 		return nil
 	}
 
+	dialer := &kafka.Dialer{
+		Timeout:   10 * time.Second,
+		DualStack: true,
+		TLS:       k.opts.TLSConfig,
+	}
+
 	k.writer = &kafka.Writer{
 		Addr:     kafka.TCP(k.opts.Addrs...),
 		Balancer: &kafka.LeastBytes{},
+		Transport: &kafka.Transport{
+			Dial: dialer.DialFunc,
+			TLS:  k.opts.TLSConfig,
+		},
 	}
 
+	k.ctx, k.cancel = context.WithCancel(context.Background())
 	k.running = true
 	return nil
 }
@@ -59,6 +72,10 @@ func (k *kafkaBroker) Disconnect() error {
 
 	if !k.running {
 		return nil
+	}
+
+	if k.cancel != nil {
+		k.cancel()
 	}
 
 	if k.writer != nil {
@@ -104,15 +121,23 @@ func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
 	options := broker.NewSubscribeOptions(opts...)
 
+	dialer := &kafka.Dialer{
+		Timeout:   10 * time.Second,
+		DualStack: true,
+		TLS:       k.opts.TLSConfig,
+	}
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  k.opts.Addrs,
 		GroupID:  options.Queue,
 		Topic:    topic,
 		MinBytes: 10e3,
 		MaxBytes: 10e6,
+		Dialer:   dialer,
 	})
 
 	k.Lock()
+	brokerCtx := k.ctx
 	if k.readers == nil {
 		k.readers = make(map[string]*kafka.Reader)
 	}
@@ -120,7 +145,11 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 	k.readers[subID] = reader
 	k.Unlock()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(brokerCtx)
 
 	go func() {
 		defer cancel()

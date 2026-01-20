@@ -18,6 +18,8 @@ type rmqBroker struct {
 
 	sync.RWMutex
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (r *rmqBroker) Options() broker.Options { return r.opts }
@@ -45,7 +47,16 @@ func (r *rmqBroker) Connect() error {
 	}
 
 	addr := r.Address()
-	conn, err := amqp.Dial(addr)
+	var (
+		conn *amqp.Connection
+		err  error
+	)
+
+	if r.opts.TLSConfig != nil {
+		conn, err = amqp.DialTLS(addr, r.opts.TLSConfig)
+	} else {
+		conn, err = amqp.Dial(addr)
+	}
 	if err != nil {
 		return err
 	}
@@ -58,12 +69,14 @@ func (r *rmqBroker) Connect() error {
 	}
 	r.channel = ch
 
+	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
 
 	// Handle reconnection
 	go func() {
 		for {
 			r.RLock()
+			ctx := r.ctx
 			if !r.running {
 				r.RUnlock()
 				return
@@ -89,7 +102,12 @@ func (r *rmqBroker) Connect() error {
 					}
 				}
 			}
-			time.Sleep(5 * time.Second)
+			
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}()
 
@@ -102,6 +120,10 @@ func (r *rmqBroker) Disconnect() error {
 
 	if !r.running {
 		return nil
+	}
+
+	if r.cancel != nil {
+		r.cancel()
 	}
 
 	if r.channel != nil {
@@ -153,7 +175,15 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
 	options := broker.NewSubscribeOptions(opts...)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	r.RLock()
+	brokerCtx := r.ctx
+	r.RUnlock()
+
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(brokerCtx)
 
 	go r.runSubscriber(ctx, topic, handler, options)
 
@@ -212,10 +242,10 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			msgs, err := ch.Consume(
 				q.Name, // queue
 				"",     // consumer
-				options.AutoAck,
-				false, // exclusive
-				false, // no-local
-				false, // no-wait
+				false,  // always manual ack for framework-level control
+				false,  // exclusive
+				false,  // no-local
+				false,  // no-wait
 				nil,   // args
 			)
 			if err != nil {

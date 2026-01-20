@@ -26,6 +26,8 @@ type sqsBroker struct {
 
 	sync.RWMutex
 	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func (s *sqsBroker) Options() broker.Options { return s.opts }
@@ -58,6 +60,7 @@ func (s *sqsBroker) Connect() error {
 	}
 
 	s.client = sqs.NewFromConfig(cfg)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.running = true
 	return nil
 }
@@ -68,6 +71,10 @@ func (s *sqsBroker) Disconnect() error {
 
 	if !s.running {
 		return nil
+	}
+
+	if s.cancel != nil {
+		s.cancel()
 	}
 
 	s.client = nil
@@ -119,13 +126,18 @@ func (s *sqsBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 
 	s.RLock()
 	client := s.client
+	brokerCtx := s.ctx
 	s.RUnlock()
 
 	if client == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	if brokerCtx == nil {
+		brokerCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(brokerCtx)
 
 	sub := &sqsSubscriber{
 		topic:  topic,
