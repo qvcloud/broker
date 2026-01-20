@@ -1,1 +1,14 @@
 .vscode
+.DS_Store
+*.tmp
+*.swp
+
+# Go
+vendor/
+*.exe
+*.test
+*.out
+bin/
+*.prof
+*.log
+.env*

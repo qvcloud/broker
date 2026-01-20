@@ -3,40 +3,51 @@ package broker
 import (
 	"context"
 	"crypto/tls"
+
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
+// Options contains the broker configuration.
 type Options struct {
-	Addrs  []string
+	// Addrs is a list of broker addresses.
+	Addrs []string
+	// Secure specifies whether to use a secure connection.
 	Secure bool
-	Codec  Marshaler
+	// Codec is the marshaler used for encoding/decoding messages.
+	Codec Marshaler
 
-	// Handler executed when error happens in broker message processing
+	// ErrorHandler is called when an error occurs during message handling.
 	ErrorHandler Handler
 
+	// TLSConfig is the TLS configuration for secure connections.
 	TLSConfig *tls.Config
-	// Other options for implementations of the interface
-	// can be stored in a context
+
+	// Tracer is the OpenTelemetry tracer for observability.
+	Tracer trace.Tracer
+	// Meter is the OpenTelemetry meter for observability.
+	Meter metric.Meter
+
+	// Context is the underlying context for custom options.
 	Context context.Context
 }
 
+// PublishOptions contains options for publishing a message.
 type PublishOptions struct {
-	// Other options for implementations of the interface
-	// can be stored in a context
-	Context     context.Context
+	// Context is the context for the publish operation.
+	Context context.Context
+	// ShardingKey is the key used for sharding/partitioning.
 	ShardingKey string
 }
 
+// SubscribeOptions contains options for subscribing to a topic.
 type SubscribeOptions struct {
-	// AutoAck defaults to true. When a handler returns
-	// with a nil error the message is acked.
+	// AutoAck specifies whether to automatically acknowledge messages.
 	AutoAck bool
-	// Subscribers with the same queue name
-	// will create a shared subscription where each
-	// receives a subset of messages.
+	// Queue is the consumer group name or queue name.
 	Queue string
 
-	// Other options for implementations of the interface
-	// can be stored in a context
+	// Context is the context for the subscribe operation.
 	Context context.Context
 }
 
@@ -113,6 +124,20 @@ func Queue(name string) SubscribeOption {
 func Secure(b bool) Option {
 	return func(o *Options) {
 		o.Secure = b
+	}
+}
+
+// Tracer sets the tracer used for observability.
+func Tracer(t trace.Tracer) Option {
+	return func(o *Options) {
+		o.Tracer = t
+	}
+}
+
+// Meter sets the meter used for observability.
+func Meter(m metric.Meter) Option {
+	return func(o *Options) {
+		o.Meter = m
 	}
 }
 

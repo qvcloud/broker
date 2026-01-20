@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type noopSubscriber struct {
@@ -97,6 +99,18 @@ func (b *noopBroker) String() string {
 }
 
 func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, opts ...PublishOption) error {
+	if b.opts.Tracer != nil {
+		var span trace.Span
+		ctx, span = b.opts.Tracer.Start(ctx, "broker.publish",
+			trace.WithSpanKind(trace.SpanKindProducer),
+			trace.WithAttributes(
+				attribute.String("messaging.system", "noop"),
+				attribute.String("messaging.destination", topic),
+			),
+		)
+		defer span.End()
+	}
+
 	b.RLock()
 	subs, ok := b.Subscribers[topic]
 	b.RUnlock()

@@ -18,18 +18,17 @@ Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提�
 ├── options.go         // 统一配置项
 ├── json.go            // 默认 JSON 编解码器
 ├── noop_broker.go     // 空实现（用于测试）
+├── middleware/        // 中间件（如 OTEL）
 ├── brokers/           // 各 MQ 适配器实现
-│   ├── rocketmq/
-│   ├── kafka/
-│   ├── nats/
-│   ├── rabbitmq/
+│   ├── rocketmq/      // RocketMQ 适配器
+│   ├── kafka/         // Kafka 适配器
 │   └── ...
 └── examples/          // 使用示例
 ```
 
 ## 快速开始
 
-参考 [examples/basic/main.go](examples/basic/main.go) 中的简单示例。
+### 1. 使用 No-op Broker (用于本地开发/测试)
 
 ```go
 import "github.com/qvcloud/broker"
@@ -40,18 +39,57 @@ b.Connect()
 
 // 订阅
 b.Subscribe("topic", func(ctx context.Context, event broker.Event) error {
-    fmt.Println(string(event.Message().Body))
+    fmt.Println("Received:", string(event.Message().Body))
     return nil
 })
 
 // 发布
-b.Publish(ctx, "topic", &broker.Message{Body: []byte("hello")})
+b.Publish(context.Background(), "topic", &broker.Message{Body: []byte("hello")})
 ```
 
-## 贡献
+### 2. 使用 RocketMQ
 
-欢迎提交 Issue 和 Pull Request。
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/rocketmq"
+)
 
-## 许可证
+b := rocketmq.NewBroker(
+    broker.Addrs("127.0.0.1:9876"),
+)
+b.Connect()
+```
 
-MIT
+### 3. 使用 Kafka
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/kafka"
+)
+
+b := kafka.NewBroker(
+    broker.Addrs("127.0.0.1:9092"),
+)
+b.Connect()
+```
+
+### 4. 集成 OpenTelemetry
+
+```go
+import (
+    "github.com/qvcloud/broker/middleware"
+)
+
+b.Subscribe("topic", middleware.OtelHandler(func(ctx context.Context, event broker.Event) error {
+    // 处理逻辑...
+    return nil
+}))
+```
+
+## 核心设计原则
+
+1. **接口驱动**: 保证业务逻辑与具体的 MQ 实现解耦。
+2. **高性能**: 适配层保持极简，最小化性能开销。
+3. **可观测性**: 原生支持 OpenTelemetry。
