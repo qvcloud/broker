@@ -168,3 +168,28 @@ b.Subscribe("topic", middleware.OtelHandler(func(ctx context.Context, event brok
 1. **接口驱动**: 保证业务逻辑与具体的 MQ 实现解耦。
 2. **高性能**: 适配层保持极简，最小化性能开销。
 3. **可观测性**: 原生支持 OpenTelemetry。
+
+## 性能表现
+
+我们对 `broker` 框架的基础损耗进行了评估，测试环境为 Apple M2 Pro (Go 1.21)。
+
+### 1. 序列化优化 (Smart Serialization)
+
+通过对原始数据（Bytes/String）的智能路径优化，序列化性能提升了约 **5 倍**。
+
+| 测试场景 | 耗时 (ns/op) | 内存分配 (B/op) | 分配次数 (allocs/op) | 结论 |
+| :--- | :--- | :--- | :--- | :--- |
+| 标准 `json.Marshal` (Bytes) | 83.52 | 88 | 2 | 基准 |
+| **智能序列化 (Bytes)** | **15.91** | **24** | **1** | **提速 ~5.2x** |
+| 标准 `json.Marshal` (String) | 86.18 | 64 | 2 | 基准 |
+| **智能序列化 (String)** | **16.20** | **24** | **1** | **提速 ~5.3x** |
+
+### 2. 框架基础开销
+
+| 测试项目 | 耗时 (ns/op) | 内存分配 (B/op) | 分配次数 (allocs/op) |
+| :--- | :--- | :--- | :--- |
+| `NoopBroker` 发布 | 37.94 | 80 | 2 |
+| `WithTrackedValue` (首次) | 154.9 | 504 | 6 |
+| `GetTrackedValue` (读取) | 29.17 | 0 | 0 |
+
+> **注**: 选项追踪 (Option Tracking) 引入的额外开销在网络 IO 面前（秒级/毫秒级）几乎可以忽略不计，但它能显著提升开发效率，防止因配置拼写错误或跨平台参数误用导致的“静默失败”。
