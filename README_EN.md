@@ -167,3 +167,28 @@ The `error` returned by the handler function in `b.Subscribe` directly affects t
 1. **Interface Driven**: Ensures business logic is decoupled from specific MQ implementations.
 2. **High Performance**: The adaptation layer is kept minimal to minimize overhead.
 3. **Observability**: Built-in support for OpenTelemetry.
+
+## Performance
+
+We evaluated the baseline overhead of the `broker` framework on an Apple M2 Pro (Go 1.21).
+
+### 1. Smart Serialization
+
+By implementing smart paths for raw data (`[]byte`/`string`), serialization performance has been improved by approximately **5x**.
+
+| Test Case | Latency (ns/op) | Memory (B/op) | Allocations (allocs/op) | Conclusion |
+| :--- | :--- | :--- | :--- | :--- |
+| Standard `json.Marshal` (Bytes) | 83.52 | 88 | 2 | Baseline |
+| **Smart Serialization (Bytes)** | **15.91** | **24** | **1** | **~5.2x Faster** |
+| Standard `json.Marshal` (String) | 86.18 | 64 | 2 | Baseline |
+| **Smart Serialization (String)** | **16.20** | **24** | **1** | **~5.3x Faster** |
+
+### 2. Framework Overhead
+
+| Item | Latency (ns/op) | Memory (B/op) | Allocations (allocs/op) |
+| :--- | :--- | :--- | :--- |
+| `NoopBroker` Publish | 37.94 | 80 | 2 |
+| `WithTrackedValue` (Initial) | 154.9 | 504 | 6 |
+| `GetTrackedValue` (Read) | 29.17 | 0 | 0 |
+
+> **Note**: The overhead introduced by **Option Tracking** is negligible compared to network I/O latency (ms/s range). However, it significantly improves developer experience by preventing "silent failures" caused by typos or cross-platform parameter misuse.
