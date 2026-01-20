@@ -1,0 +1,3 @@
+# Exclude specifications and plans from GitHub language statistics
+specs/** linguist-vendored
+.specify/** linguist-vendored
