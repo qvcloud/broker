@@ -50,6 +50,10 @@ func (r *rmqBroker) Connect() error {
 		return nil
 	}
 
+	if len(r.opts.Addrs) == 0 {
+		return fmt.Errorf("rocketmq: namesrv addrs are required")
+	}
+
 	if r.producer == nil {
 		opts := []producer.Option{
 			producer.WithNameServer(r.opts.Addrs),
@@ -67,17 +71,21 @@ func (r *rmqBroker) Connect() error {
 			if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok {
 				opts = append(opts, producer.WithNamespace(v))
 			}
+			if v, ok := broker.GetTrackedValue(r.opts.Context, instanceNameKey{}).(string); ok {
+				opts = append(opts, producer.WithInstanceName(v))
+			} else if r.opts.ClientID != "" {
+				opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
+			}
 			if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok && v {
 				opts = append(opts, producer.WithTrace(&primitive.TraceConfig{}))
 			}
 			// Acknowledge options used elsewhere
 			broker.GetTrackedValue(r.opts.Context, concurrencyKey{})
+		} else if r.opts.ClientID != "" {
+			opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
 		}
 		opts = append(opts, producer.WithRetry(retry))
 
-		if r.opts.ClientID != "" {
-			opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
-		}
 		p, err := rocketmq.NewProducer(opts...)
 		if err != nil {
 			if r.opts.Logger != nil {
@@ -250,45 +258,54 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
 	options := broker.NewSubscribeOptions(opts...)
 
+	r.Lock()
+	defer r.Unlock()
+
+	if len(r.opts.Addrs) == 0 {
+		return nil, fmt.Errorf("rocketmq: namesrv addrs are required")
+	}
+
 	groupID := options.Queue
 	if groupID == "" {
-		if r.opts.Context != nil {
-			if v, ok := r.opts.Context.Value(groupNameKey{}).(string); ok {
-				groupID = v
-			}
+		if v, ok := broker.GetTrackedValue(r.opts.Context, groupNameKey{}).(string); ok {
+			groupID = v
 		}
 	}
 	if groupID == "" {
 		groupID = "GID_DEFAULT"
 	}
 
-	r.Lock()
 	brokerCtx := r.ctx
 	if r.consumer == nil {
-		opts := []consumer.Option{
+		subOpts := []consumer.Option{
 			consumer.WithNameServer(r.opts.Addrs),
 			consumer.WithGroupName(groupID),
 		}
 
 		if r.opts.Context != nil {
 			if v, ok := broker.GetTrackedValue(r.opts.Context, concurrencyKey{}).(int); ok {
-				opts = append(opts, consumer.WithConsumeGoroutineNums(v))
+				subOpts = append(subOpts, consumer.WithConsumeGoroutineNums(v))
 			}
 			if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok {
-				opts = append(opts, consumer.WithNamespace(v))
+				subOpts = append(subOpts, consumer.WithNamespace(v))
 			}
+			if v, ok := broker.GetTrackedValue(r.opts.Context, instanceNameKey{}).(string); ok {
+				subOpts = append(subOpts, consumer.WithInstance(v))
+			} else if r.opts.ClientID != "" {
+				subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
+			}
+			if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok && v {
+				subOpts = append(subOpts, consumer.WithTrace(&primitive.TraceConfig{}))
+			}
+		} else if r.opts.ClientID != "" {
+			subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
 		}
 
-		if r.opts.ClientID != "" {
-			opts = append(opts, consumer.WithInstance(r.opts.ClientID))
-		}
-
-		c, err := rocketmq.NewPushConsumer(opts...)
+		c, err := rocketmq.NewPushConsumer(subOpts...)
 		if err != nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ consumer creation error: %v", err)
 			}
-			r.Unlock()
 			return nil, err
 		}
 		r.consumer = c
@@ -296,11 +313,9 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ consumer start error: %v", err)
 			}
-			r.Unlock()
 			return nil, err
 		}
 	}
-	r.Unlock()
 
 	if brokerCtx == nil {
 		brokerCtx = context.Background()
@@ -404,11 +419,18 @@ type retryKey struct{}
 type concurrencyKey struct{}
 type tracingKey struct{}
 type namespaceKey struct{}
+type instanceNameKey struct{}
 type shardingKey struct{}
 
 func WithGroupName(name string) broker.Option {
 	return func(o *broker.Options) {
 		o.Context = broker.WithTrackedValue(o.Context, groupNameKey{}, name, "rocketmq.WithGroupName")
+	}
+}
+
+func WithInstanceName(name string) broker.Option {
+	return func(o *broker.Options) {
+		o.Context = broker.WithTrackedValue(o.Context, instanceNameKey{}, name, "rocketmq.WithInstanceName")
 	}
 }
 

@@ -192,3 +192,4 @@ By implementing smart paths for raw data (`[]byte`/`string`), serialization perf
 | `GetTrackedValue` (Read) | 29.17 | 0 | 0 |
 
 > **Note**: The overhead introduced by **Option Tracking** is negligible compared to network I/O latency (ms/s range). However, it significantly improves developer experience by preventing "silent failures" caused by typos or cross-platform parameter misuse.
+

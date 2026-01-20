@@ -46,6 +46,10 @@ func (k *kafkaBroker) Connect() error {
 		return nil
 	}
 
+	if len(k.opts.Addrs) == 0 {
+		return fmt.Errorf("kafka: broker addresses are required")
+	}
+
 	dialer := &kafka.Dialer{
 		ClientID:  k.opts.ClientID,
 		Timeout:   10 * time.Second,
@@ -154,6 +158,10 @@ func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 
 func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
 	options := broker.NewSubscribeOptions(opts...)
+
+	if len(k.opts.Addrs) == 0 {
+		return nil, fmt.Errorf("kafka: broker addresses are required")
+	}
 
 	dialer := &kafka.Dialer{
 		ClientID:  k.opts.ClientID,

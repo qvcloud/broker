@@ -28,7 +28,7 @@ func (r *rmqBroker) Address() string {
 	if len(r.opts.Addrs) > 0 {
 		return r.opts.Addrs[0]
 	}
-	return "amqp://guest:guest@localhost:5672/"
+	return ""
 }
 
 func (r *rmqBroker) Init(opts ...broker.Option) error {
@@ -44,6 +44,10 @@ func (r *rmqBroker) Connect() error {
 
 	if r.running {
 		return nil
+	}
+
+	if len(r.opts.Addrs) == 0 {
+		return fmt.Errorf("rabbitmq: server addresses are required")
 	}
 
 	addr := r.Address()

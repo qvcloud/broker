@@ -26,7 +26,7 @@ func (n *natsBroker) Address() string {
 	if len(n.opts.Addrs) > 0 {
 		return n.opts.Addrs[0]
 	}
-	return nats.DefaultURL
+	return ""
 }
 
 func (n *natsBroker) Init(opts ...broker.Option) error {
@@ -42,6 +42,10 @@ func (n *natsBroker) Connect() error {
 
 	if n.running {
 		return nil
+	}
+
+	if len(n.opts.Addrs) == 0 {
+		return fmt.Errorf("nats: server addresses are required")
 	}
 
 	addr := n.Address()
@@ -196,6 +200,7 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 	}
 
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
