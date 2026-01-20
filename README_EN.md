@@ -1,0 +1,169 @@
+# Unified MQ Broker for Go
+
+Unified MQ Broker for Go is a generic message middleware adapter for Go. It provides a unified and concise API to decouple ground-level MQ implementations (such as RocketMQ, Kafka, RabbitMQ, etc.) from your business logic.
+
+## Key Features
+
+- **Interface Driven**: Unified `Broker`, `Publisher`, and `Subscriber` interfaces.
+- **Multi-Driver Support**: Supports RocketMQ, Kafka, NATS, RabbitMQ, AWS SQS, GCP Pub/Sub, and more.
+- **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
+- **Universal Model**: A vendor-agnostic message structure.
+
+## Project Structure
+
+```
+.
+├── broker.go          // Core interface definitions
+├── message.go         // Unified message structure
+├── options.go         // Unified configuration options
+├── json.go            // Default JSON codec
+├── noop_broker.go     // Mock implementation (for testing)
+├── middleware/        // Middlewares (e.g., OpenTelemetry)
+├── brokers/           // MQ adapter implementations
+│   ├── rocketmq/      // RocketMQ adapter
+│   ├── kafka/         // Kafka adapter
+│   └── ...
+└── examples/          // Usage examples
+```
+
+## Quick Start
+
+### 1. Using No-op Broker (For local development/testing)
+
+```go
+import "github.com/qvcloud/broker"
+
+// Initialize
+b := broker.NewNoopBroker()
+b.Connect()
+
+// Subscribe
+b.Subscribe("topic", func(ctx context.Context, event broker.Event) error {
+    fmt.Println("Received:", string(event.Message().Body))
+    return nil
+})
+
+// Publish
+b.Publish(context.Background(), "topic", &broker.Message{Body: []byte("hello")})
+```
+
+### 2. Using RocketMQ
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/rocketmq"
+)
+
+b := rocketmq.NewBroker(
+    broker.Addrs("127.0.0.1:9876"),
+)
+b.Connect()
+```
+
+### 3. Using Kafka
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/kafka"
+)
+
+b := kafka.NewBroker(
+    broker.Addrs("127.0.0.1:9092"),
+)
+b.Connect()
+```
+
+### 4. Using RabbitMQ
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/rabbitmq"
+)
+
+b := rabbitmq.NewBroker(
+    broker.Addrs("amqp://guest:guest@localhost:5672/"),
+)
+b.Connect()
+```
+
+### 5. Using NATS
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/nats"
+)
+
+b := nats.NewBroker(
+    broker.Addrs("nats://localhost:4222"),
+)
+b.Connect()
+```
+
+### 6. Using AWS SQS
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/sqs"
+)
+
+// SQS loads credentials and region from default AWS config
+b := sqs.NewBroker()
+b.Connect()
+
+// Publish to a specific Queue URL
+b.Publish(ctx, "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue", msg)
+```
+
+### 7. Using GCP Pub/Sub
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/pubsub"
+)
+
+// Pass GCP Project ID in Addrs
+b := pubsub.NewBroker(
+    broker.Addrs("my-gcp-project-id"),
+)
+b.Connect()
+
+// Use WithQueue to specify the Subscription ID during subscription
+b.Subscribe("my-topic", handler, broker.WithQueue("my-subscription"))
+```
+
+### 8. Integrating OpenTelemetry
+
+```go
+import (
+    "github.com/qvcloud/broker/middleware"
+)
+
+b.Subscribe("topic", middleware.OtelHandler(func(ctx context.Context, event broker.Event) error {
+    // Handling logic...
+    return nil
+}))
+```
+
+### 💡 Handling Callback (Handler) Return Values
+
+The `error` returned by the handler function in `b.Subscribe` directly affects the message acknowledgment mechanism:
+
+- **Return `nil`**: The message was processed successfully. The broker adapter will automatically acknowledge (Ack) the message, and it will not be redelivered.
+- **Return `error`**: The processing failed. The message will not be acknowledged. Depending on the underlying MQ implementation, the message will typically:
+    - **Requeue**: e.g., in RabbitMQ, it returns to the queue for another attempt.
+    - **Wait for Timeout**: e.g., in SQS or GCP Pub/Sub, the message becomes visible again after the Visibility Timeout expires.
+    - **Pause Commit**: e.g., in Kafka, it might delay the advancement of the consumer offset.
+
+**Pro-tip**: For logical errors or errors that cannot be fixed by retrying, it is recommended to catch the exception, log it, and return `nil`, or manually move the message to a Dead Letter Queue (DLQ) to avoid blocking the queue with infinite retries.
+
+## Core Design Principles
+
+1. **Interface Driven**: Ensures business logic is decoupled from specific MQ implementations.
+2. **High Performance**: The adaptation layer is kept minimal to minimize overhead.
+3. **Observability**: Built-in support for OpenTelemetry.

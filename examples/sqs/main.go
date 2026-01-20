@@ -24,7 +24,7 @@ func main() {
 	defer b.Disconnect()
 
 	// queueURL := "your-sqs-queue-url"
-	queueURL := "your-sqs-queue-url" 
+	queueURL := "your-sqs-queue-url"
 
 	// Subscribe
 	_, err := b.Subscribe(queueURL, func(ctx context.Context, p broker.Event) error {
