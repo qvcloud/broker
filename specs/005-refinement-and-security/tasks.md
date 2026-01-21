@@ -21,5 +21,5 @@
 
 ## Phase 4: Final Validation
 
-- [ ] T011 Verify all tests pass
-- [ ] T012 Update README with TLS configuration details
+- [X] T011 Verify all tests pass
+- [X] T012 Update README with TLS configuration details

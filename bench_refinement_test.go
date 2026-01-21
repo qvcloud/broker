@@ -65,6 +65,20 @@ func BenchmarkStandardJson_Marshal(b *testing.B) {
 	})
 }
 
+func BenchmarkStandardJson_Marshal_Struct(b *testing.B) {
+	dataStruct := complexStruct{
+		ID:     123,
+		Name:   "Test Object",
+		Tags:   []string{"tag1", "tag2", "tag3"},
+		Active: true,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = json.Marshal(dataStruct)
+	}
+}
+
 func BenchmarkOptionTracker(b *testing.B) {
 	ctx := context.Background()
 

@@ -6,15 +6,16 @@ Unified MQ Broker for Go is a generic message middleware adapter for Go. It prov
 
 - **Interface Driven**: Unified `Broker`, `Publisher`, and `Subscriber` interfaces.
 - **Multi-Driver Support**:
-    | Driver | Status | Description |
-    | :--- | :--- | :--- |
-    | **RocketMQ** | ✅ Supported | Alibaba / Native RocketMQ |
-    | **Kafka** | ✅ Supported | High-performance implementation via sarama |
-    | **RabbitMQ** | ✅ Supported | Standard AMQP protocol |
-    | **Redis** | ✅ Supported | Based on **Streams** (Consumer Group) |
-    | **NATS** | ✅ Supported | High-performance messaging system |
-    | **AWS SQS** | ✅ Supported | Amazon Simple Queue Service |
-    | **GCP Pub/Sub** | ✅ Supported | Google Cloud Pub/Sub |
+    | Driver | Status | Coverage | Description |
+    | :--- | :--- | :--- | :--- |
+    | **Core Framework** | ✅ Ready | **89.4%** | Core logic & Global Options |
+    | **AWS SQS** | ✅ Ready | **94.6%** | Amazon Simple Queue Service |
+    | **NATS** | ✅ Ready | **91.7%** | High-performance messaging system |
+    | **Redis** | ✅ Ready | **91.6%** | Based on **Streams** (Consumer Group) |
+    | **RocketMQ** | ✅ Ready | **83.6%** | Alibaba / Native RocketMQ |
+    | **RabbitMQ** | ✅ Ready | **82.7%** | Standard AMQP protocol |
+    | **Kafka** | ✅ Ready | **82.4%** | High-performance implementation via sarama |
+    | **GCP Pub/Sub** | ✅ Supported | **22.3%** | Google Cloud Pub/Sub |
 - **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
 - **Universal Model**: A vendor-agnostic message structure.
 

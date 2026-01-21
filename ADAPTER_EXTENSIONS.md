@@ -25,6 +25,25 @@
 
 ---
 
+## 参数解析规则与冲突处理
+
+为了确保不同中间件适配器的健壮性，本库遵循以下参数处理规则：
+
+### 1. 优先级策略 (Precedence)
+当同时提供了通用 Option 和适配器特定 Option 时，**适配器特定 Option 具有更高优先级**。
+例如，在 RocketMQ 中：
+* `rocketmq.WithTag("A")` 将覆盖 `broker.WithTags("B")`。
+* `rocketmq.WithShardingKey("K1")` 将覆盖 `broker.WithShardingKey("K2")`。
+
+### 2. 延迟绑定 (Late Binding)
+所有的网络连接和客户端底层初始化均在 `Connect()` 调用时发生，而非 `NewBroker` 或 `Init`。这允许在连接前动态调整所有参数。
+
+### 3. 未消费选项警告 (Unconsumed Option Warnings)
+如果用户向适配器传递了该适配器不支持的选项（例如向 Kafka 传递了 `rocketmq.WithAsync`），系统会在调用 `Connect()` 或 `Publish()` 时通过注入的 `broker.Logger` 输出警告日志：
+> `Warning: option "rocketmq.WithAsync" was ignored by the implementation`
+
+---
+
 ## 2. RocketMQ (`brokers/rocketmq`)
 
 ### 初始化选项 (Option)

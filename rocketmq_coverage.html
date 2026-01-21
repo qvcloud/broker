@@ -1,0 +1,623 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>rocketmq: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/qvcloud/broker/brokers/rocketmq/rocketmq.go (34.1%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package rocketmq
+
+import (
+        "context"
+        "fmt"
+        "sync"
+        "time"
+
+        "github.com/apache/rocketmq-client-go/v2"
+
+        "github.com/apache/rocketmq-client-go/v2/consumer"
+        "github.com/apache/rocketmq-client-go/v2/primitive"
+        "github.com/apache/rocketmq-client-go/v2/producer"
+        "github.com/apache/rocketmq-client-go/v2/rlog"
+        "github.com/qvcloud/broker"
+)
+
+type rmqBroker struct {
+        opts broker.Options
+
+        producer rocketmq.Producer
+        consumer rocketmq.PushConsumer
+
+        sync.RWMutex
+        running bool
+        ctx     context.Context
+        cancel  context.CancelFunc
+}
+
+func (r *rmqBroker) Options() broker.Options <span class="cov0" title="0">{ return r.opts }</span>
+
+func (r *rmqBroker) Address() string <span class="cov8" title="1">{
+        if len(r.opts.Addrs) &gt; 0 </span><span class="cov8" title="1">{
+                return r.opts.Addrs[0]
+        }</span>
+        <span class="cov0" title="0">return ""</span>
+}
+
+func (r *rmqBroker) Init(opts ...broker.Option) error <span class="cov8" title="1">{
+        for _, o := range opts </span><span class="cov8" title="1">{
+                o(&amp;r.opts)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+func (r *rmqBroker) Connect() error <span class="cov0" title="0">{
+        r.Lock()
+        defer r.Unlock()
+
+        if r.running </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+
+        <span class="cov0" title="0">if len(r.opts.Addrs) == 0 </span><span class="cov0" title="0">{
+                return fmt.Errorf("rocketmq: namesrv addrs are required")
+        }</span>
+
+        <span class="cov0" title="0">if r.producer == nil </span><span class="cov0" title="0">{
+                opts := []producer.Option{
+                        producer.WithNameServer(r.opts.Addrs),
+                }
+
+                // Extract custom options from Context
+                retry := 2
+                if r.opts.Context != nil </span><span class="cov0" title="0">{
+                        if v, ok := broker.GetTrackedValue(r.opts.Context, retryKey{}).(int); ok </span><span class="cov0" title="0">{
+                                retry = v
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, groupNameKey{}).(string); ok </span><span class="cov0" title="0">{
+                                opts = append(opts, producer.WithGroupName(v))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok </span><span class="cov0" title="0">{
+                                opts = append(opts, producer.WithNamespace(v))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, instanceNameKey{}).(string); ok </span><span class="cov0" title="0">{
+                                opts = append(opts, producer.WithInstanceName(v))
+                        }</span> else<span class="cov0" title="0"> if r.opts.ClientID != "" </span><span class="cov0" title="0">{
+                                opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok &amp;&amp; v </span><span class="cov0" title="0">{
+                                opts = append(opts, producer.WithTrace(&amp;primitive.TraceConfig{
+                                        NamesrvAddrs: r.opts.Addrs,
+                                }))
+                        }</span>
+                        // Acknowledge options used elsewhere
+                        <span class="cov0" title="0">broker.GetTrackedValue(r.opts.Context, concurrencyKey{})</span>
+                } else<span class="cov0" title="0"> if r.opts.ClientID != "" </span><span class="cov0" title="0">{
+                        opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
+                }</span>
+                <span class="cov0" title="0">opts = append(opts, producer.WithRetry(retry))
+
+                p, err := rocketmq.NewProducer(opts...)
+                if err != nil </span><span class="cov0" title="0">{
+                        if r.opts.Logger != nil </span><span class="cov0" title="0">{
+                                r.opts.Logger.Logf("RocketMQ producer creation error: %v", err)
+                        }</span>
+                        <span class="cov0" title="0">return err</span>
+                }
+                <span class="cov0" title="0">if err := p.Start(); err != nil </span><span class="cov0" title="0">{
+                        if r.opts.Logger != nil </span><span class="cov0" title="0">{
+                                r.opts.Logger.Logf("RocketMQ producer start error: %v", err)
+                        }</span>
+                        <span class="cov0" title="0">return err</span>
+                }
+                <span class="cov0" title="0">r.producer = p</span>
+        }
+
+        <span class="cov0" title="0">r.ctx, r.cancel = context.WithCancel(context.Background())
+        r.running = true
+
+        broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
+        return nil</span>
+}
+
+func (r *rmqBroker) Disconnect() error <span class="cov8" title="1">{
+        r.Lock()
+        defer r.Unlock()
+
+        if !r.running </span><span class="cov0" title="0">{
+                return nil
+        }</span>
+
+        <span class="cov8" title="1">if r.cancel != nil </span><span class="cov0" title="0">{
+                r.cancel()
+        }</span>
+
+        <span class="cov8" title="1">if r.producer != nil </span><span class="cov8" title="1">{
+                r.producer.Shutdown()
+                r.producer = nil
+        }</span>
+
+        <span class="cov8" title="1">if r.consumer != nil </span><span class="cov8" title="1">{
+                r.consumer.Shutdown()
+                r.consumer = nil
+        }</span>
+
+        <span class="cov8" title="1">r.running = false
+        return nil</span>
+}
+
+func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error <span class="cov8" title="1">{
+        options := broker.PublishOptions{
+                Context: ctx,
+        }
+        for _, o := range opts </span><span class="cov0" title="0">{
+                o(&amp;options)
+        }</span>
+
+        <span class="cov8" title="1">rmqMsg := primitive.NewMessage(topic, msg.Body)
+        for k, v := range msg.Header </span><span class="cov0" title="0">{
+                switch k </span>{
+                case "KEYS":<span class="cov0" title="0">
+                        rmqMsg.WithKeys([]string{v})</span>
+                case "SHARDING_KEY":<span class="cov0" title="0">
+                        if options.ShardingKey == "" </span><span class="cov0" title="0">{
+                                options.ShardingKey = v
+                        }</span>
+                default:<span class="cov0" title="0">
+                        rmqMsg.WithProperty(k, v)</span>
+                }
+        }
+
+        <span class="cov8" title="1">if options.Delay &gt; 0 </span><span class="cov0" title="0">{
+                // RocketMQ delay levels: 1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+                // We'll map to the closest level or just provide a helper.
+                // For now, we'll use a simple mapping for common durations.
+                level := 0
+                d := options.Delay
+                switch </span>{
+                case d &lt;= 1*time.Second:<span class="cov0" title="0">
+                        level = 1</span>
+                case d &lt;= 5*time.Second:<span class="cov0" title="0">
+                        level = 2</span>
+                case d &lt;= 10*time.Second:<span class="cov0" title="0">
+                        level = 3</span>
+                case d &lt;= 30*time.Second:<span class="cov0" title="0">
+                        level = 4</span>
+                case d &lt;= 1*time.Minute:<span class="cov0" title="0">
+                        level = 5</span>
+                case d &lt;= 2*time.Minute:<span class="cov0" title="0">
+                        level = 6</span>
+                case d &lt;= 3*time.Minute:<span class="cov0" title="0">
+                        level = 7</span>
+                case d &lt;= 4*time.Minute:<span class="cov0" title="0">
+                        level = 8</span>
+                case d &lt;= 5*time.Minute:<span class="cov0" title="0">
+                        level = 9</span>
+                case d &lt;= 6*time.Minute:<span class="cov0" title="0">
+                        level = 10</span>
+                case d &lt;= 7*time.Minute:<span class="cov0" title="0">
+                        level = 11</span>
+                case d &lt;= 8*time.Minute:<span class="cov0" title="0">
+                        level = 12</span>
+                case d &lt;= 9*time.Minute:<span class="cov0" title="0">
+                        level = 13</span>
+                case d &lt;= 10*time.Minute:<span class="cov0" title="0">
+                        level = 14</span>
+                case d &lt;= 20*time.Minute:<span class="cov0" title="0">
+                        level = 15</span>
+                case d &lt;= 30*time.Minute:<span class="cov0" title="0">
+                        level = 16</span>
+                case d &lt;= 1*time.Hour:<span class="cov0" title="0">
+                        level = 17</span>
+                case d &lt;= 2*time.Hour:<span class="cov0" title="0">
+                        level = 18</span>
+                }
+                <span class="cov0" title="0">if level &gt; 0 </span><span class="cov0" title="0">{
+                        rmqMsg.WithDelayTimeLevel(level)
+                }</span>
+        }
+
+        // Precedence: rocketmq.WithShardingKey &gt; broker.WithShardingKey
+        <span class="cov8" title="1">if options.Context != nil </span><span class="cov8" title="1">{
+                if v, ok := broker.GetTrackedValue(options.Context, shardingKey{}).(string); ok </span><span class="cov0" title="0">{
+                        options.ShardingKey = v
+                }</span>
+        }
+        <span class="cov8" title="1">if options.ShardingKey != "" </span><span class="cov0" title="0">{
+                rmqMsg.WithShardingKey(options.ShardingKey)
+        }</span>
+
+        // Handle tags
+        <span class="cov8" title="1">if len(options.Tags) &gt; 0 </span><span class="cov0" title="0">{
+                rmqMsg.WithTag(options.Tags[0])
+        }</span>
+        <span class="cov8" title="1">if options.Context != nil </span><span class="cov8" title="1">{
+                if v, ok := broker.GetTrackedValue(options.Context, tagKey{}).(string); ok </span><span class="cov0" title="0">{
+                        rmqMsg.WithTag(v)
+                }</span>
+        }
+
+        // Handle Async
+        <span class="cov8" title="1">async := false
+        if options.Context != nil </span><span class="cov8" title="1">{
+                if v, ok := broker.GetTrackedValue(options.Context, asyncKey{}).(bool); ok </span><span class="cov8" title="1">{
+                        async = v
+                }</span>
+        }
+
+        <span class="cov8" title="1">if async </span><span class="cov8" title="1">{
+                return r.producer.SendAsync(ctx, func(ctx context.Context, res *primitive.SendResult, err error) </span><span class="cov8" title="1">{
+                        if err != nil &amp;&amp; r.opts.Logger != nil </span><span class="cov0" title="0">{
+                                r.opts.Logger.Logf("RocketMQ async send error: %v", err)
+                        }</span>
+                }, rmqMsg)
+        }
+
+        <span class="cov8" title="1">res, err := r.producer.SendSync(ctx, rmqMsg)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">if res.Status != primitive.SendOK </span><span class="cov0" title="0">{
+                return fmt.Errorf("send failed: %s", res.String())
+        }</span>
+
+        <span class="cov8" title="1">broker.WarnUnconsumed(options.Context, r.opts.Logger)
+        return nil</span>
+}
+
+func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) <span class="cov8" title="1">{
+        options := broker.NewSubscribeOptions(opts...)
+
+        r.Lock()
+        defer r.Unlock()
+
+        if len(r.opts.Addrs) == 0 </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("rocketmq: namesrv addrs are required")
+        }</span>
+
+        <span class="cov8" title="1">groupID := options.Queue
+        if groupID == "" </span><span class="cov8" title="1">{
+                if v, ok := broker.GetTrackedValue(r.opts.Context, groupNameKey{}).(string); ok </span><span class="cov0" title="0">{
+                        groupID = v
+                }</span>
+        }
+        <span class="cov8" title="1">if groupID == "" </span><span class="cov8" title="1">{
+                groupID = "GID_DEFAULT"
+        }</span>
+
+        <span class="cov8" title="1">brokerCtx := r.ctx
+        if r.consumer == nil </span><span class="cov0" title="0">{
+                subOpts := []consumer.Option{
+                        consumer.WithNameServer(r.opts.Addrs),
+                        consumer.WithGroupName(groupID),
+                }
+
+                if r.opts.Context != nil </span><span class="cov0" title="0">{
+                        if v, ok := broker.GetTrackedValue(r.opts.Context, concurrencyKey{}).(int); ok </span><span class="cov0" title="0">{
+                                subOpts = append(subOpts, consumer.WithConsumeGoroutineNums(v))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, namespaceKey{}).(string); ok </span><span class="cov0" title="0">{
+                                subOpts = append(subOpts, consumer.WithNamespace(v))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, instanceNameKey{}).(string); ok </span><span class="cov0" title="0">{
+                                subOpts = append(subOpts, consumer.WithInstance(v))
+                        }</span> else<span class="cov0" title="0"> if r.opts.ClientID != "" </span><span class="cov0" title="0">{
+                                subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
+                        }</span>
+                        <span class="cov0" title="0">if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok &amp;&amp; v </span><span class="cov0" title="0">{
+                                subOpts = append(subOpts, consumer.WithTrace(&amp;primitive.TraceConfig{
+                                        NamesrvAddrs: r.opts.Addrs,
+                                }))
+                        }</span>
+                } else<span class="cov0" title="0"> if r.opts.ClientID != "" </span><span class="cov0" title="0">{
+                        subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
+                }</span>
+
+                <span class="cov0" title="0">c, err := rocketmq.NewPushConsumer(subOpts...)
+                if err != nil </span><span class="cov0" title="0">{
+                        if r.opts.Logger != nil </span><span class="cov0" title="0">{
+                                r.opts.Logger.Logf("RocketMQ consumer creation error: %v", err)
+                        }</span>
+                        <span class="cov0" title="0">return nil, err</span>
+                }
+                <span class="cov0" title="0">r.consumer = c
+                if err := r.consumer.Start(); err != nil </span><span class="cov0" title="0">{
+                        if r.opts.Logger != nil </span><span class="cov0" title="0">{
+                                r.opts.Logger.Logf("RocketMQ consumer start error: %v", err)
+                        }</span>
+                        <span class="cov0" title="0">return nil, err</span>
+                }
+        }
+
+        <span class="cov8" title="1">if brokerCtx == nil </span><span class="cov8" title="1">{
+                brokerCtx = context.Background()
+        }</span>
+
+        <span class="cov8" title="1">ctx, cancel := context.WithCancel(brokerCtx)
+
+        err := r.consumer.Subscribe(topic, consumer.MessageSelector{}, func(consumeCtx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) </span><span class="cov8" title="1">{
+                for _, m := range msgs </span><span class="cov8" title="1">{
+                        msg := &amp;broker.Message{
+                                Header: m.GetProperties(),
+                                Body:   m.Body,
+                        }
+
+                        event := &amp;rmqEvent{
+                                topic:   topic,
+                                message: msg,
+                                res:     consumer.ConsumeSuccess,
+                        }
+
+                        // If AutoAck is off, default to retry unless user explicitly acks
+                        if !options.AutoAck </span><span class="cov0" title="0">{
+                                event.res = consumer.ConsumeRetryLater
+                        }</span>
+
+                        <span class="cov8" title="1">if err := handler(ctx, event); err != nil </span><span class="cov0" title="0">{
+                                return consumer.ConsumeRetryLater, err
+                        }</span>
+
+                        <span class="cov8" title="1">if !options.AutoAck </span><span class="cov0" title="0">{
+                                return event.res, nil
+                        }</span>
+                }
+                <span class="cov8" title="1">return consumer.ConsumeSuccess, nil</span>
+        })
+
+        <span class="cov8" title="1">if err != nil </span><span class="cov0" title="0">{
+                cancel()
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">return &amp;rmqSubscriber{
+                topic:  topic,
+                opts:   options,
+                broker: r,
+                cancel: cancel,
+        }, nil</span>
+}
+
+func (r *rmqBroker) String() string <span class="cov8" title="1">{
+        return "rocketmq"
+}</span>
+
+type rmqSubscriber struct {
+        topic  string
+        opts   broker.SubscribeOptions
+        broker *rmqBroker
+        cancel context.CancelFunc
+}
+
+func (s *rmqSubscriber) Options() broker.SubscribeOptions <span class="cov0" title="0">{
+        return s.opts
+}</span>
+
+func (s *rmqSubscriber) Topic() string <span class="cov0" title="0">{
+        return s.topic
+}</span>
+
+func (s *rmqSubscriber) Unsubscribe() error <span class="cov8" title="1">{
+        if s.cancel != nil </span><span class="cov8" title="1">{
+                s.cancel()
+        }</span>
+        <span class="cov8" title="1">s.broker.Lock()
+        defer s.broker.Unlock()
+        if s.broker.consumer != nil </span><span class="cov8" title="1">{
+                return s.broker.consumer.Unsubscribe(s.topic)
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+type rmqEvent struct {
+        topic   string
+        message *broker.Message
+        res     consumer.ConsumeResult
+        mu      sync.Mutex
+}
+
+func (e *rmqEvent) Topic() string <span class="cov0" title="0">{
+        return e.topic
+}</span>
+
+func (e *rmqEvent) Message() *broker.Message <span class="cov0" title="0">{
+        return e.message
+}</span>
+
+func (e *rmqEvent) Ack() error <span class="cov0" title="0">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+        e.res = consumer.ConsumeSuccess
+        return nil
+}</span>
+
+func (e *rmqEvent) Nack(requeue bool) error <span class="cov0" title="0">{
+        e.mu.Lock()
+        defer e.mu.Unlock()
+        if requeue </span><span class="cov0" title="0">{
+                e.res = consumer.ConsumeRetryLater
+        }</span> else<span class="cov0" title="0"> {
+                // RocketMQ doesn't have a direct "drop" without acking in common push consumer,
+                // so we just succeed to move offset forward.
+                e.res = consumer.ConsumeSuccess
+        }</span>
+        <span class="cov0" title="0">return nil</span>
+}
+
+func (e *rmqEvent) Error() error <span class="cov0" title="0">{
+        return nil
+}</span>
+
+func NewBroker(opts ...broker.Option) broker.Broker <span class="cov8" title="1">{
+        options := broker.NewOptions(opts...)
+
+        return &amp;rmqBroker{
+                opts: *options,
+        }
+}</span>
+
+type groupNameKey struct{}
+type retryKey struct{}
+type concurrencyKey struct{}
+type tracingKey struct{}
+type namespaceKey struct{}
+type instanceNameKey struct{}
+type shardingKey struct{}
+
+func WithGroupName(name string) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, groupNameKey{}, name, "rocketmq.WithGroupName")
+        }</span>
+}
+
+func WithInstanceName(name string) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, instanceNameKey{}, name, "rocketmq.WithInstanceName")
+        }</span>
+}
+
+func WithRetry(times int) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, retryKey{}, times, "rocketmq.WithRetry")
+        }</span>
+}
+
+func WithConsumeGoroutineNums(nums int) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, concurrencyKey{}, nums, "rocketmq.WithConsumeGoroutineNums")
+        }</span>
+}
+
+func WithTracingEnabled(enabled bool) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, tracingKey{}, enabled, "rocketmq.WithTracingEnabled")
+        }</span>
+}
+
+func WithNamespace(ns string) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, namespaceKey{}, ns, "rocketmq.WithNamespace")
+        }</span>
+}
+
+func WithLogLevel(level string) broker.Option <span class="cov0" title="0">{
+        return func(o *broker.Options) </span><span class="cov0" title="0">{
+                rlog.SetLogLevel(level)
+        }</span>
+}
+
+type asyncKey struct{}
+type tagKey struct{}
+
+func WithAsync() broker.PublishOption <span class="cov8" title="1">{
+        return func(o *broker.PublishOptions) </span><span class="cov8" title="1">{
+                o.Context = broker.WithTrackedValue(o.Context, asyncKey{}, true, "rocketmq.WithAsync")
+        }</span>
+}
+
+func WithTag(tag string) broker.PublishOption <span class="cov0" title="0">{
+        return func(o *broker.PublishOptions) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, tagKey{}, tag, "rocketmq.WithTag")
+        }</span>
+}
+
+func WithShardingKey(key string) broker.PublishOption <span class="cov0" title="0">{
+        return func(o *broker.PublishOptions) </span><span class="cov0" title="0">{
+                o.Context = broker.WithTrackedValue(o.Context, shardingKey{}, key, "rocketmq.WithShardingKey")
+        }</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

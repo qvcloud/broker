@@ -10,16 +10,43 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type rabbitConn interface {
+	Channel() (rabbitChannel, error)
+	Close() error
+	IsClosed() bool
+}
+
+type rabbitChannel interface {
+	PublishWithContext(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
+	Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
+	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
+	Close() error
+	Qos(prefetchCount, prefetchSize int, global bool) error
+}
+
+type connWrapper struct{ *amqp.Connection }
+
+func (w *connWrapper) Channel() (rabbitChannel, error) {
+	return w.Connection.Channel()
+}
+
 type rmqBroker struct {
 	opts broker.Options
 
-	conn    *amqp.Connection
-	channel *amqp.Channel
+	conn    rabbitConn
+	channel rabbitChannel
 
 	sync.RWMutex
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	// Internal factories for testing
+	newConn func(addr string, config amqp.Config) (rabbitConn, error)
+
+	reconnectInterval time.Duration
 }
 
 func (r *rmqBroker) Options() broker.Options { return r.opts }
@@ -60,7 +87,7 @@ func (r *rmqBroker) Connect() error {
 		}
 	}
 
-	conn, err := amqp.DialConfig(addr, config)
+	conn, err := r.newConn(addr, config)
 	if err != nil {
 		return err
 	}
@@ -95,7 +122,7 @@ func (r *rmqBroker) Connect() error {
 				if r.opts.Logger != nil {
 					r.opts.Logger.Log("RabbitMQ connection lost, reconnecting...")
 				}
-				newConn, err := amqp.Dial(r.Address())
+				newConn, err := r.newConn(r.Address(), amqp.Config{})
 				if err == nil {
 					r.Lock()
 					r.conn = newConn
@@ -113,7 +140,7 @@ func (r *rmqBroker) Connect() error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(r.reconnectInterval):
 			}
 		}
 	}()
@@ -241,13 +268,13 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			r.RUnlock()
 
 			if conn == nil || conn.IsClosed() {
-				time.Sleep(time.Second)
+				time.Sleep(r.reconnectInterval)
 				continue
 			}
 
 			ch, err := conn.Channel()
 			if err != nil {
-				time.Sleep(time.Second)
+				time.Sleep(r.reconnectInterval)
 				continue
 			}
 
@@ -296,7 +323,7 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			)
 			if err != nil {
 				ch.Close()
-				time.Sleep(time.Second)
+				time.Sleep(r.reconnectInterval)
 				continue
 			}
 
@@ -319,7 +346,7 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			)
 			if err != nil {
 				ch.Close()
-				time.Sleep(time.Second)
+				time.Sleep(r.reconnectInterval)
 				continue
 			}
 
@@ -390,7 +417,13 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &rmqBroker{
 		opts: *options,
-	}
+		newConn: func(addr string, config amqp.Config) (rabbitConn, error) {
+			conn, err := amqp.DialConfig(addr, config)
+			if err != nil {
+				return nil, err
+			}
+			return &connWrapper{conn}, nil
+		}, reconnectInterval: 5 * time.Second}
 }
 
 type exchangeKey struct{}
@@ -476,6 +509,9 @@ func WithMandatory() broker.PublishOption {
 }
 
 func stringMapToTable(m map[string]string) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
 	res := make(map[string]interface{})
 	for k, v := range m {
 		res[k] = v

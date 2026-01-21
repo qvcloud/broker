@@ -30,6 +30,8 @@ type sqsBroker struct {
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	newClient func(ctx context.Context) (sqsAPI, error)
 }
 
 func (s *sqsBroker) Options() broker.Options { return s.opts }
@@ -56,12 +58,12 @@ func (s *sqsBroker) Connect() error {
 		return nil
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.Background())
+	cli, err := s.newClient(context.Background())
 	if err != nil {
 		return err
 	}
 
-	s.client = sqs.NewFromConfig(cfg)
+	s.client = cli
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.running = true
 
@@ -321,6 +323,13 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &sqsBroker{
 		opts: *options,
+		newClient: func(ctx context.Context) (sqsAPI, error) {
+			cfg, err := config.LoadDefaultConfig(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return sqs.NewFromConfig(cfg), nil
+		},
 	}
 }
 

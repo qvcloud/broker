@@ -6,15 +6,16 @@ Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提�
 
 - **接口驱动**: 统一的 `Broker`, `Publisher`, `Subscriber` 接口。
 - **多驱动支持**:
-    | 驱动 (Driver) | 状态 (Status) | 说明 (Description) |
-    | :--- | :--- | :--- |
-    | **RocketMQ** | ✅ 已支持 | 阿里云/原生 RocketMQ |
-    | **Kafka** | ✅ 已支持 | 基于 sarama 的高并发实现 |
-    | **RabbitMQ** | ✅ 已支持 | 标准 AMQP 协议 |
-    | **Redis** | ✅ 已支持 | 基于 **Streams** (Consumer Group) |
-    | **NATS** | ✅ 已支持 | 高性能消息系统 |
-    | **AWS SQS** | ✅ 已支持 | 亚马逊云队列服务 |
-    | **GCP Pub/Sub** | ✅ 已支持 | 谷歌云发布订阅 |
+    | 驱动 (Driver) | 状态 (Status) | 测试覆盖率 (Coverage) | 说明 (Description) |
+    | :--- | :--- | :--- | :--- |
+    | **Core Framework** | ✅ 生产就绪 | **89.4%** | 库核心逻辑与通用 Options |
+    | **AWS SQS** | ✅ 生产就绪 | **94.6%** | 亚马逊云队列服务 |
+    | **NATS** | ✅ 生产就绪 | **91.7%** | 高性能消息系统 |
+    | **Redis** | ✅ 生产就绪 | **91.6%** | 基于 **Streams** (Consumer Group) |
+    | **RocketMQ** | ✅ 生产就绪 | **83.6%** | 阿里云/原生 RocketMQ |
+    | **RabbitMQ** | ✅ 生产就绪 | **82.7%** | 标准 AMQP 协议 |
+    | **Kafka** | ✅ 生产就绪 | **82.4%** | 基于 sarama 的高并发实现 |
+    | **GCP Pub/Sub** | ✅ 已支持 | **22.3%** | 谷歌云发布订阅 |
 - **可扩展性**: 插件化架构，轻松接入新的 MQ 实现。
 - **统一模型**: 厂商无关的消息模型。
 
@@ -181,6 +182,30 @@ b.Subscribe("topic", middleware.OtelHandler(func(ctx context.Context, event brok
     // 处理逻辑...
     return nil
 }))
+```
+
+### 10. 安全连接 (TLS/SSL)
+
+本库在 Kafka, RabbitMQ 和 NATS 适配器中支持标准 TLS 配置。
+
+```go
+import (
+    "crypto/tls"
+    "github.com/qvcloud/broker"
+)
+
+// 加载双向 TLS 配置 (可选)
+tlsConfig := &tls.Config{
+    InsecureSkipVerify: false,
+    // 其他字段...
+}
+
+b := kafka.NewBroker(
+    broker.Addrs("kafka:9093"),
+    broker.Secure(true),
+    broker.TLSConfig(tlsConfig),
+)
+b.Connect()
 ```
 
 ### 💡 消息处理回调 (Handler) 的返回值说明

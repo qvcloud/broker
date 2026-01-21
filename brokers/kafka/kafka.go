@@ -10,16 +10,31 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+type kafkaWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
+}
+
+type kafkaReader interface {
+	FetchMessage(ctx context.Context) (kafka.Message, error)
+	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
+}
+
 type kafkaBroker struct {
 	opts broker.Options
 
-	writer *kafka.Writer
+	writer kafkaWriter
 
 	sync.RWMutex
-	readers map[string]*kafka.Reader
+	readers map[string]kafkaReader
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	// Internal factories for testing
+	newWriter func(*kafka.Writer) kafkaWriter
+	newReader func(kafka.ReaderConfig) kafkaReader
 }
 
 func (k *kafkaBroker) Options() broker.Options { return k.opts }
@@ -77,7 +92,7 @@ func (k *kafkaBroker) Connect() error {
 		broker.GetTrackedValue(k.opts.Context, offsetKey{})
 	}
 
-	k.writer = &kafka.Writer{
+	k.writer = k.newWriter(&kafka.Writer{
 		Addr:         kafka.TCP(k.opts.Addrs...),
 		Balancer:     balancer,
 		RequiredAcks: requiredAcks,
@@ -86,7 +101,7 @@ func (k *kafkaBroker) Connect() error {
 			TLS:  k.opts.TLSConfig,
 		},
 		BatchSize: batchSize,
-	}
+	})
 
 	k.ctx, k.cancel = context.WithCancel(context.Background())
 	k.running = true
@@ -115,7 +130,7 @@ func (k *kafkaBroker) Disconnect() error {
 	for _, r := range k.readers {
 		r.Close()
 	}
-	k.readers = make(map[string]*kafka.Reader)
+	k.readers = make(map[string]kafkaReader)
 
 	k.running = false
 	return nil
@@ -186,7 +201,7 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		}
 	}
 
-	reader := kafka.NewReader(kafka.ReaderConfig{
+	reader := k.newReader(kafka.ReaderConfig{
 		Brokers:     k.opts.Addrs,
 		GroupID:     options.Queue,
 		Topic:       topic,
@@ -199,7 +214,7 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 	k.Lock()
 	brokerCtx := k.ctx
 	if k.readers == nil {
-		k.readers = make(map[string]*kafka.Reader)
+		k.readers = make(map[string]kafkaReader)
 	}
 	subID := fmt.Sprintf("%s-%s-%d", topic, options.Queue, time.Now().UnixNano())
 	k.readers[subID] = reader
@@ -270,7 +285,7 @@ func (k *kafkaBroker) String() string {
 type kafkaSubscriber struct {
 	topic  string
 	opts   broker.SubscribeOptions
-	reader *kafka.Reader
+	reader kafkaReader
 	cancel context.CancelFunc
 }
 
@@ -292,7 +307,7 @@ func (s *kafkaSubscriber) Unsubscribe() error {
 type kafkaEvent struct {
 	topic   string
 	message *broker.Message
-	reader  *kafka.Reader
+	reader  kafkaReader
 	rawMsg  kafka.Message
 	ctx     context.Context
 }
@@ -325,7 +340,13 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 
 	return &kafkaBroker{
 		opts:    *options,
-		readers: make(map[string]*kafka.Reader),
+		readers: make(map[string]kafkaReader),
+		newWriter: func(w *kafka.Writer) kafkaWriter {
+			return w
+		},
+		newReader: func(cfg kafka.ReaderConfig) kafkaReader {
+			return kafka.NewReader(cfg)
+		},
 	}
 }
 

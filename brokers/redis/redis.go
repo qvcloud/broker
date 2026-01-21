@@ -11,14 +11,25 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type redisClient interface {
+	Ping(ctx context.Context) *redis.StatusCmd
+	Close() error
+	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
+	XGroupCreateMkStream(ctx context.Context, stream, group, start string) *redis.StatusCmd
+	XReadGroup(ctx context.Context, a *redis.XReadGroupArgs) *redis.XStreamSliceCmd
+	XAck(ctx context.Context, stream, group string, ids ...string) *redis.IntCmd
+}
+
 type redisBroker struct {
 	opts   broker.Options
-	client *redis.Client
+	client redisClient
 
 	sync.RWMutex
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	newClient func(opts *redis.Options) redisClient
 }
 
 func (r *redisBroker) Options() broker.Options { return r.opts }
@@ -67,7 +78,7 @@ func (r *redisBroker) Connect() error {
 		}
 	}
 
-	r.client = redis.NewClient(redisOpts)
+	r.client = r.newClient(redisOpts)
 
 	// Check connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -199,7 +210,7 @@ func (r *redisBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 	}, nil
 }
 
-func (r *redisBroker) processStream(ctx context.Context, client *redis.Client, topic, group, consumer, id string, handler broker.Handler, subOpts broker.SubscribeOptions) bool {
+func (r *redisBroker) processStream(ctx context.Context, client redisClient, topic, group, consumer, id string, handler broker.Handler, subOpts broker.SubscribeOptions) bool {
 	streams, err := client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    group,
 		Consumer: consumer,
@@ -276,7 +287,7 @@ type redisEvent struct {
 	msg    *broker.Message
 	raw    redis.XMessage
 	group  string
-	client *redis.Client
+	client redisClient
 }
 
 func (e *redisEvent) Topic() string            { return e.topic }
@@ -317,5 +328,8 @@ func WithMaxLen(l int64) broker.PublishOption {
 func NewBroker(opts ...broker.Option) broker.Broker {
 	return &redisBroker{
 		opts: *broker.NewOptions(opts...),
+		newClient: func(opts *redis.Options) redisClient {
+			return redis.NewClient(opts)
+		},
 	}
 }

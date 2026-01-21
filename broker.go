@@ -103,6 +103,20 @@ func WithTrackedValue(ctx context.Context, key, val any, name string) context.Co
 	return context.WithValue(ctx, key, val)
 }
 
+// TrackOptions initializes an OptionTracker in the context.
+func TrackOptions(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Value(trackerKey{}).(*OptionTracker); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, trackerKey{}, &OptionTracker{
+		registered: make(map[any]string),
+		consumed:   make(map[any]struct{}),
+	})
+}
+
 // GetTrackedValue retrieves a value from the context and marks it as consumed.
 func GetTrackedValue(ctx context.Context, key any) any {
 	if ctx == nil {

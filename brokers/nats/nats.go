@@ -10,14 +10,23 @@ import (
 	"github.com/qvcloud/broker"
 )
 
+type natsConn interface {
+	PublishMsg(m *nats.Msg) error
+	Subscribe(subj string, cb nats.MsgHandler) (*nats.Subscription, error)
+	QueueSubscribe(subj, queue string, cb nats.MsgHandler) (*nats.Subscription, error)
+	Close()
+}
+
 type natsBroker struct {
 	opts broker.Options
-	conn *nats.Conn
+	conn natsConn
 
 	sync.RWMutex
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	newConn func(addr string, opts ...nats.Option) (natsConn, error)
 }
 
 func (n *natsBroker) Options() broker.Options { return n.opts }
@@ -50,7 +59,7 @@ func (n *natsBroker) Connect() error {
 
 	addr := n.Address()
 	var (
-		conn *nats.Conn
+		conn natsConn
 		err  error
 	)
 
@@ -71,7 +80,7 @@ func (n *natsBroker) Connect() error {
 		}
 	}
 
-	conn, err = nats.Connect(addr, opts...)
+	conn, err = n.newConn(addr, opts...)
 	if err != nil {
 		if n.opts.Logger != nil {
 			n.opts.Logger.Logf("NATS connect error to %s: %v", addr, err)
@@ -243,7 +252,7 @@ type natsEvent struct {
 
 func (e *natsEvent) Topic() string            { return e.topic }
 func (e *natsEvent) Message() *broker.Message { return e.message }
-func (e *natsEvent) Ack() error { return e.nm.Ack() }
+func (e *natsEvent) Ack() error               { return e.nm.Ack() }
 func (e *natsEvent) Nack(requeue bool) error {
 	if !requeue {
 		return e.nm.Term()
@@ -256,6 +265,9 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &natsBroker{
 		opts: *options,
+		newConn: func(addr string, opts ...nats.Option) (natsConn, error) {
+			return nats.Connect(addr, opts...)
+		},
 	}
 }
 

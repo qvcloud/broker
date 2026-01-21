@@ -21,6 +21,10 @@ type rmqBroker struct {
 	producer rocketmq.Producer
 	consumer rocketmq.PushConsumer
 
+	// Internal factories for testing
+	newProducer func(...producer.Option) (rocketmq.Producer, error)
+	newConsumer func(...consumer.Option) (rocketmq.PushConsumer, error)
+
 	sync.RWMutex
 	running bool
 	ctx     context.Context
@@ -89,7 +93,7 @@ func (r *rmqBroker) Connect() error {
 		}
 		opts = append(opts, producer.WithRetry(retry))
 
-		p, err := rocketmq.NewProducer(opts...)
+		p, err := r.newProducer(opts...)
 		if err != nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ producer creation error: %v", err)
@@ -306,7 +310,7 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 			subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
 		}
 
-		c, err := rocketmq.NewPushConsumer(subOpts...)
+		c, err := r.newConsumer(subOpts...)
 		if err != nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("RocketMQ consumer creation error: %v", err)
@@ -444,7 +448,9 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 
 	return &rmqBroker{
-		opts: *options,
+		opts:        *options,
+		newProducer: rocketmq.NewProducer,
+		newConsumer: rocketmq.NewPushConsumer,
 	}
 }
 

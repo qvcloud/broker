@@ -102,6 +102,18 @@ func NewSubscribeOptions(opts ...SubscribeOption) SubscribeOptions {
 	return opt
 }
 
+func NewPublishOptions(opts ...PublishOption) PublishOptions {
+	opt := PublishOptions{
+		Context: context.Background(),
+	}
+
+	for _, o := range opts {
+		o(&opt)
+	}
+
+	return opt
+}
+
 // Addrs sets the host addresses to be used by the broker.
 func Addrs(addrs ...string) Option {
 	return func(o *Options) {
@@ -121,6 +133,13 @@ func Codec(c Marshaler) Option {
 func ClientID(id string) Option {
 	return func(o *Options) {
 		o.ClientID = id
+	}
+}
+
+// WithContext sets the context for the broker.
+func WithContext(ctx context.Context) Option {
+	return func(o *Options) {
+		o.Context = ctx
 	}
 }
 
@@ -182,6 +201,13 @@ func TLSConfig(t *tls.Config) Option {
 	}
 }
 
+// WithClientID sets the client identifier.
+func WithClientID(id string) Option {
+	return func(o *Options) {
+		o.ClientID = id
+	}
+}
+
 // PublishContext set context.
 func PublishContext(ctx context.Context) PublishOption {
 	return func(o *PublishOptions) {
@@ -220,6 +246,13 @@ func WithDeadLetterQueue(v string) SubscribeOption {
 func WithQueue(name string) SubscribeOption {
 	return func(o *SubscribeOptions) {
 		o.Queue = name
+	}
+}
+
+// WithAutoAck sets the auto acknowledgement for the subscription.
+func WithAutoAck(ack bool) SubscribeOption {
+	return func(o *SubscribeOptions) {
+		o.AutoAck = ack
 	}
 }
 
