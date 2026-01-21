@@ -1,14 +1,11 @@
 <!--
-Version change: 0.0.0 → 0.3.0
+Version change: 0.3.1 → 0.3.2
 Modified principles:
-  - [PRINCIPLE_1_NAME] → I. Interface-Driven & Vendor-Agnostic
-  - [PRINCIPLE_2_NAME] → II. Reliability First (At-Least-Once Delivery)
-  - [PRINCIPLE_3_NAME] → III. Minimal Dependencies & Loose Licensing
-  - [PRINCIPLE_4_NAME] → IV. Standardized Configuration (Options Pattern)
-  - [PRINCIPLE_5_NAME] → V. Comprehensive Documentation & Examples
-Added sections: Technical Standards, Development Workflow
+  - IV. Standardized Configuration (Options Pattern) → IV. Standardized & Transparent Configuration
+Added sections: None
+Removed sections: None
 Templates requiring updates:
-  - .specify/templates/plan-template.md (✅ aligned)
+  - .specify/templates/plan-template.md (✅ updated)
   - .specify/templates/spec-template.md (✅ aligned)
   - .specify/templates/tasks-template.md (✅ aligned)
 Follow-up TODOs: None
@@ -27,8 +24,8 @@ Implementations must prioritize message delivery reliability. For Redis, this me
 ### III. Minimal Dependencies & Loose Licensing
 The core library should have minimal external dependencies. All code and adapters are released under the MIT License to ensure maximum reuse and minimum friction for users.
 
-### IV. Standardized Configuration (Options Pattern)
-All brokers must follow the functional options pattern for configuration. Common options (Addrs, TLS, Logger, ClientID) must be uniformly respected. Custom options (e.g., `WithPassword`, `WithMaxLen`) should be implemented via `broker.Option` with tracked values to maintain interface consistency.
+### IV. Standardized & Transparent Configuration
+All brokers must follow the functional options pattern for configuration. Common options (Addrs, TLS, Logger, ClientID) must be uniformly respected and propagated to internal clients. Adapters MUST provide semantic transparency; for example, SQS MUST auto-resolve Queue URLs from names, and Kafka MUST propagate ClientIDs for observability.
 
 ### V. Behavioral Consistency (Ack/Nack/AutoAck)
 All adapters must honor the `AutoAck` setting and provide consistent `Ack()` and `Nack(requeue)` behaviors. `Nack(false)` must ensure the message is not redelivered (e.g., by committing offset or deleting message), while `Nack(true)` must trigger a retry.
@@ -55,4 +52,4 @@ Every new broker implementation must be accompanied by a functional example in t
 - Amendments to principles require a MINOR version bump.
 - All PRs must verify compliance with the "Core Principles" during review.
 
-**Version**: 0.3.1 | **Ratified**: 2025-05-18 | **Last Amended**: 2025-05-18
+**Version**: 0.3.2 | **Ratified**: 2025-05-18 | **Last Amended**: 2026-01-21

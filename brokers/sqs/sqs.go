@@ -103,6 +103,15 @@ func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 	}
 
 	queueUrl := topic
+	if !strings.HasPrefix(topic, "http") {
+		out, err := client.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{
+			QueueName: aws.String(topic),
+		})
+		if err != nil {
+			return fmt.Errorf("sqs: failed to resolve queue url for %s: %v", topic, err)
+		}
+		queueUrl = *out.QueueUrl
+	}
 
 	input := &sqs.SendMessageInput{
 		QueueUrl:          aws.String(queueUrl),
@@ -150,6 +159,17 @@ func (s *sqsBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		return nil, fmt.Errorf("not connected")
 	}
 
+	queueUrl := topic
+	if !strings.HasPrefix(topic, "http") {
+		out, err := client.GetQueueUrl(brokerCtx, &sqs.GetQueueUrlInput{
+			QueueName: aws.String(topic),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("sqs: failed to resolve queue url for %s: %v", topic, err)
+		}
+		queueUrl = *out.QueueUrl
+	}
+
 	if brokerCtx == nil {
 		brokerCtx = context.Background()
 	}
@@ -157,12 +177,12 @@ func (s *sqsBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	ctx, cancel := context.WithCancel(brokerCtx)
 
 	sub := &sqsSubscriber{
-		topic:  topic,
+		topic:  queueUrl,
 		opts:   options,
 		cancel: cancel,
 	}
 
-	go s.run(ctx, topic, handler, options)
+	go s.run(ctx, queueUrl, handler, options)
 
 	return sub, nil
 }
@@ -209,8 +229,11 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 				input.VisibilityTimeout = visibilityTimeout
 			}
 
-			output, err := s.client.ReceiveMessage(ctx, input)
+			output, err := client.ReceiveMessage(ctx, input)
 			if err != nil {
+				if ctx.Err() == nil && s.opts.Logger != nil {
+					s.opts.Logger.Logf("SQS receive error: %v", err)
+				}
 				time.Sleep(time.Second)
 				continue
 			}
@@ -232,7 +255,7 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 					topic:   queueUrl,
 					message: msg,
 					sm:      sm,
-					client:  s.client,
+					client:  client,
 					ctx:     ctx,
 				}
 

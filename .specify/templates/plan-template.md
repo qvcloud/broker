@@ -35,6 +35,7 @@
 - [ ] **Reliability**: If a new adapter, does it support At-Least-Once delivery? (e.g. Streams/Consumer Groups)
 - [ ] **Licensing**: Are all new dependencies compatible with MIT License?
 - [ ] **Options Pattern**: Does configuration use functional options with tracked values?
+- [ ] **Behavioral Consistency**: Does it follow the standardized Ack/Nack(requeue) behavior?
 - [ ] **Doc/Ex**: Is the feature planned to have an example and dual-language documentation?
 
 ## Project Structure
