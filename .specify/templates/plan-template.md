@@ -33,6 +33,7 @@
 
 - [ ] **Interface-Driven**: Does this feature adhere to the `Broker` interface?
 - [ ] **Reliability**: If a new adapter, does it support At-Least-Once delivery? (e.g. Streams/Consumer Groups)
+- [ ] **Binary Efficiency**: Ensure the core package does not import implementation packages (adapters).
 - [ ] **Licensing**: Are all new dependencies compatible with MIT License?
 - [ ] **Options Pattern**: Does configuration use functional options with tracked values?
 - [ ] **Behavioral Consistency**: Does it follow the standardized Ack/Nack(requeue) behavior?
