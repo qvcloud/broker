@@ -5,7 +5,16 @@ Unified MQ Broker for Go is a generic message middleware adapter for Go. It prov
 ## Key Features
 
 - **Interface Driven**: Unified `Broker`, `Publisher`, and `Subscriber` interfaces.
-- **Multi-Driver Support**: Supports RocketMQ, Kafka, NATS, RabbitMQ, Redis Streams, Redis Streams, AWS SQS, GCP Pub/Sub, and more.
+- **Multi-Driver Support**:
+    | Driver | Status | Description |
+    | :--- | :--- | :--- |
+    | **RocketMQ** | ✅ Supported | Alibaba / Native RocketMQ |
+    | **Kafka** | ✅ Supported | High-performance implementation via sarama |
+    | **RabbitMQ** | ✅ Supported | Standard AMQP protocol |
+    | **Redis** | ✅ Supported | Based on **Streams** (Consumer Group) |
+    | **NATS** | ✅ Supported | High-performance messaging system |
+    | **AWS SQS** | ✅ Supported | Amazon Simple Queue Service |
+    | **GCP Pub/Sub** | ✅ Supported | Google Cloud Pub/Sub |
 - **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
 - **Universal Model**: A vendor-agnostic message structure.
 
@@ -20,9 +29,13 @@ Unified MQ Broker for Go is a generic message middleware adapter for Go. It prov
 ├── noop_broker.go     // Mock implementation (for testing)
 ├── middleware/        // Middlewares (e.g., OpenTelemetry)
 ├── brokers/           // MQ adapter implementations
-│   ├── rocketmq/      // RocketMQ adapter
-│   ├── kafka/         // Kafka adapter
-│   └── ...
+│   ├── rocketmq/      // RocketMQ
+│   ├── kafka/         // Kafka
+│   ├── rabbitmq/      // RabbitMQ
+│   ├── nats/          // NATS
+│   ├── redis/         // Redis Streams
+│   ├── sqs/           // AWS SQS
+│   └── pubsub/        // GCP Pub/Sub
 └── examples/          // Usage examples
 ```
 
@@ -137,7 +150,26 @@ b.Connect()
 b.Subscribe("my-topic", handler, broker.WithQueue("my-subscription"))
 ```
 
-### 8. Integrating OpenTelemetry
+### 8. Using Redis Streams
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/redis"
+)
+
+b := redis.NewBroker(
+    broker.Addrs("127.0.0.1:6379"),
+    redis.WithDB(0),
+    redis.WithPassword("your-password"),
+)
+b.Connect()
+
+// Subscribe (using Consumer Group)
+b.Subscribe("topic", handler, broker.Queue("my-group"))
+```
+
+### 9. Integrating OpenTelemetry
 
 ```go
 import (

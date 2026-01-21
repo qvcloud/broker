@@ -123,3 +123,22 @@
 | `pubsub.WithMaxOutstandingMessages(int)` | 最大待处理消息并发数限制 |
 | `pubsub.WithMaxOutstandingBytes(int)` | 最大待处理消息字节数限制 |
 | `pubsub.WithMaxExtension(time.Duration)` | 自动延长 Ack 截止时间的最大时长 |
+
+---
+
+## 8. Redis ()
+
+### 初始化选项 (Option)
+
+| 函数 | 说明 |
+| :--- | :--- |
+| `redis.WithPassword(string)` | 设置 Redis 连接密码 |
+| `redis.WithDB(int)` | 设置 Redis 数据库索引 |
+
+### 发布选项 (PublishOption)
+
+| 函数 | 说明 |
+| :--- | :--- |
+| `redis.WithMaxLen(int64)` | 设置 Stream 的最大长度 (`MAXLEN`) |
+
+**注**：Redis 适配器基于 **Redis Streams** 实现。订阅时必须通过 `broker.Queue(groupName)` 指定 Consumer Group 名称以保证消息可靠消费（PEL 支持）。

@@ -5,7 +5,16 @@ Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提�
 ## 核心特性
 
 - **接口驱动**: 统一的 `Broker`, `Publisher`, `Subscriber` 接口。
-- **多驱动支持**: 已支持 RocketMQ, Kafka, NATS, RabbitMQ, Redis Streams, AWS SQS, GCP Pub/Sub。
+- **多驱动支持**:
+    | 驱动 (Driver) | 状态 (Status) | 说明 (Description) |
+    | :--- | :--- | :--- |
+    | **RocketMQ** | ✅ 已支持 | 阿里云/原生 RocketMQ |
+    | **Kafka** | ✅ 已支持 | 基于 sarama 的高并发实现 |
+    | **RabbitMQ** | ✅ 已支持 | 标准 AMQP 协议 |
+    | **Redis** | ✅ 已支持 | 基于 **Streams** (Consumer Group) |
+    | **NATS** | ✅ 已支持 | 高性能消息系统 |
+    | **AWS SQS** | ✅ 已支持 | 亚马逊云队列服务 |
+    | **GCP Pub/Sub** | ✅ 已支持 | 谷歌云发布订阅 |
 - **可扩展性**: 插件化架构，轻松接入新的 MQ 实现。
 - **统一模型**: 厂商无关的消息模型。
 
@@ -20,9 +29,13 @@ Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提�
 ├── noop_broker.go     // 空实现（用于测试）
 ├── middleware/        // 中间件（如 OTEL）
 ├── brokers/           // 各 MQ 适配器实现
-│   ├── rocketmq/      // RocketMQ 适配器
-│   ├── kafka/         // Kafka 适配器
-│   └── ...
+│   ├── rocketmq/      // RocketMQ
+│   ├── kafka/         // Kafka
+│   ├── rabbitmq/      // RabbitMQ
+│   ├── nats/          // NATS
+│   ├── redis/         // Redis Streams
+│   ├── sqs/           // AWS SQS
+│   └── pubsub/        // GCP Pub/Sub
 └── examples/          // 使用示例
 ```
 
@@ -137,7 +150,26 @@ b.Connect()
 b.Subscribe("my-topic", handler, broker.WithQueue("my-subscription"))
 ```
 
-### 8. 集成 OpenTelemetry
+### 8. 使用 Redis Streams
+
+```go
+import (
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/redis"
+)
+
+b := redis.NewBroker(
+    broker.Addrs("127.0.0.1:6379"),
+    redis.WithDB(0),
+    redis.WithPassword("your-password"),
+)
+b.Connect()
+
+// 订阅 (使用 Consumer Group)
+b.Subscribe("topic", handler, broker.Queue("my-group"))
+```
+
+### 9. 集成 OpenTelemetry
 
 
 ```go
