@@ -198,7 +198,8 @@ func (r *redisBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 				return
 			default:
 				if !r.processStream(ctx, client, topic, group, consumerName, ">", handler, options) {
-					// If no messages, block briefly is handled by XReadGroup Block
+					// If processStream fails or has no messages, we shouldn't spin too fast if it's a persistent error
+					time.Sleep(time.Millisecond * 100)
 				}
 			}
 		}

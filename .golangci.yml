@@ -1,0 +1,43 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - staticcheck
+    - unused
+    - govet
+    - ineffassign
+    - typecheck
+
+issues:
+  # Exclude some common false positives or errors that are acceptable in specific contexts
+  exclude-rules:
+    # 1. Allow ignoring errors in test files (test code is usually less strict)
+    - path: '_test\.go'
+      linters:
+        - errcheck
+        - staticcheck
+      text: "(SA1012|Error return value of .*(Init|Connect). is not checked)"
+
+    # 2. Ignore errcheck for specific methods where missing error check is common/acceptable
+    - linters:
+        - errcheck
+      text: 'Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Shutdown|.*Unsubscribe|.*Ack|.*Nack). is not checked'
+
+    # 3. Ignore deprecation warnings for now (planned for future upgrades)
+    - linters:
+        - staticcheck
+      text: "SA1019"
+
+    # 4. Ignore warnings about using built-in string type as context keys (to be fixed later)
+    - linters:
+        - staticcheck
+      text: "SA1029"
+
+  # Set max issues to 0 to show all findings and avoid suppression during initial setup
+  max-issues-per-linter: 0
+  max-same-issues: 0

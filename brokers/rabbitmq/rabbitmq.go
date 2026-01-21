@@ -304,7 +304,11 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			}
 
 			if prefetchCount > 0 {
-				ch.Qos(prefetchCount, 0, false)
+				if err := ch.Qos(prefetchCount, 0, false); err != nil {
+					ch.Close()
+					time.Sleep(r.reconnectInterval)
+					continue
+				}
 			}
 
 			args := amqp.Table{}
@@ -328,11 +332,19 @@ func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler bro
 			}
 
 			if exchange != "" {
-				ch.ExchangeDeclare(exchange, exchangeType, true, false, false, false, nil)
+				if err := ch.ExchangeDeclare(exchange, exchangeType, true, false, false, false, nil); err != nil {
+					ch.Close()
+					time.Sleep(r.reconnectInterval)
+					continue
+				}
 			}
 
 			if topic != "" && (topic != options.Queue || exchange != "") {
-				ch.QueueBind(q.Name, topic, exchange, false, nil)
+				if err := ch.QueueBind(q.Name, topic, exchange, false, nil); err != nil {
+					ch.Close()
+					time.Sleep(r.reconnectInterval)
+					continue
+				}
 			}
 
 			msgs, err := ch.Consume(

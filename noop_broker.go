@@ -162,7 +162,7 @@ func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, op
 			if err := sub.handler(ctx, p); err != nil {
 				p.err = err
 				if eh := b.opts.ErrorHandler; eh != nil {
-					eh(ctx, p)
+					_ = eh(ctx, p)
 				}
 			}
 		}(sub, &wg)
