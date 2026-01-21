@@ -310,6 +310,9 @@ func (e *kafkaEvent) Ack() error {
 }
 
 func (e *kafkaEvent) Nack(requeue bool) error {
+	if !requeue {
+		return e.Ack()
+	}
 	return nil
 }
 

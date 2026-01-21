@@ -237,7 +237,11 @@ func (e *pubsubEvent) Ack() error {
 	return nil
 }
 func (e *pubsubEvent) Nack(requeue bool) error {
-	e.pm.Nack()
+	if !requeue {
+		e.pm.Ack() // Drop
+		return nil
+	}
+	e.pm.Nack() // Requeue
 	return nil
 }
 func (e *pubsubEvent) Error() error { return nil }

@@ -243,9 +243,14 @@ type natsEvent struct {
 
 func (e *natsEvent) Topic() string            { return e.topic }
 func (e *natsEvent) Message() *broker.Message { return e.message }
-func (e *natsEvent) Ack() error               { return e.nm.Ack() }
-func (e *natsEvent) Nack(requeue bool) error  { return e.nm.Nak() }
-func (e *natsEvent) Error() error             { return nil }
+func (e *natsEvent) Ack() error { return e.nm.Ack() }
+func (e *natsEvent) Nack(requeue bool) error {
+	if !requeue {
+		return e.nm.Term()
+	}
+	return e.nm.Nak()
+}
+func (e *natsEvent) Error() error { return nil }
 
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)

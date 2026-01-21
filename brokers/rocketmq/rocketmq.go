@@ -335,8 +335,23 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 				Body:   m.Body,
 			}
 
-			if err := handler(ctx, &rmqEvent{topic: topic, message: msg}); err != nil {
+			event := &rmqEvent{
+				topic:   topic,
+				message: msg,
+				res:     consumer.ConsumeSuccess,
+			}
+
+			// If AutoAck is off, default to retry unless user explicitly acks
+			if !options.AutoAck {
+				event.res = consumer.ConsumeRetryLater
+			}
+
+			if err := handler(ctx, event); err != nil {
 				return consumer.ConsumeRetryLater, err
+			}
+
+			if !options.AutoAck {
+				return event.res, nil
 			}
 		}
 		return consumer.ConsumeSuccess, nil
@@ -389,6 +404,8 @@ func (s *rmqSubscriber) Unsubscribe() error {
 type rmqEvent struct {
 	topic   string
 	message *broker.Message
+	res     consumer.ConsumeResult
+	mu      sync.Mutex
 }
 
 func (e *rmqEvent) Topic() string {
@@ -400,10 +417,22 @@ func (e *rmqEvent) Message() *broker.Message {
 }
 
 func (e *rmqEvent) Ack() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.res = consumer.ConsumeSuccess
 	return nil
 }
 
 func (e *rmqEvent) Nack(requeue bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if requeue {
+		e.res = consumer.ConsumeRetryLater
+	} else {
+		// RocketMQ doesn't have a direct "drop" without acking in common push consumer,
+		// so we just succeed to move offset forward.
+		e.res = consumer.ConsumeSuccess
+	}
 	return nil
 }
 

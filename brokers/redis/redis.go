@@ -285,6 +285,9 @@ func (e *redisEvent) Ack() error {
 	return e.client.XAck(context.Background(), e.topic, e.group, e.raw.ID).Err()
 }
 func (e *redisEvent) Nack(requeue bool) error {
+	if !requeue {
+		return e.Ack()
+	}
 	return nil
 }
 func (e *redisEvent) Error() error { return nil }
