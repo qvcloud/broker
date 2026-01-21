@@ -30,7 +30,10 @@ The core library should have minimal external dependencies. All code and adapter
 ### IV. Standardized Configuration (Options Pattern)
 All brokers must follow the functional options pattern for configuration. Common options (Addrs, TLS, Logger, ClientID) must be uniformly respected. Custom options (e.g., `WithPassword`, `WithMaxLen`) should be implemented via `broker.Option` with tracked values to maintain interface consistency.
 
-### V. Comprehensive Documentation & Examples
+### V. Behavioral Consistency (Ack/Nack/AutoAck)
+All adapters must honor the `AutoAck` setting and provide consistent `Ack()` and `Nack(requeue)` behaviors. `Nack(false)` must ensure the message is not redelivered (e.g., by committing offset or deleting message), while `Nack(true)` must trigger a retry.
+
+### VI. Comprehensive Documentation & Examples
 Every new broker implementation must be accompanied by a functional example in the `examples/` directory that demonstrates basic connection, publishing, and subscription. Documentation must be maintained in both Chinese (`README.md`) and English (`README_EN.md`).
 
 ## Technical Standards
@@ -52,4 +55,4 @@ Every new broker implementation must be accompanied by a functional example in t
 - Amendments to principles require a MINOR version bump.
 - All PRs must verify compliance with the "Core Principles" during review.
 
-**Version**: 0.3.0 | **Ratified**: 2025-05-18 | **Last Amended**: 2025-05-18
+**Version**: 0.3.1 | **Ratified**: 2025-05-18 | **Last Amended**: 2025-05-18
