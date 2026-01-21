@@ -1,6 +1,6 @@
-# Unified MQ Broker for Go
+# QvCloud Broker
 
-Unified MQ Broker for Go 是一个通用的消息中间件适配包，旨在提供统一、简洁的 API 接口，消除底层 MQ 服务实现（如 RocketMQ, Kafka, RabbitMQ 等）与业务逻辑之间的耦合。
+QvCloud Broker 是一个通用的消息中间件适配包，旨在提供统一、简洁的 API 接口，消除底层 MQ 服务实现（如 RocketMQ, Kafka, RabbitMQ 等）与业务逻辑之间的耦合。
 
 ## 核心特性
 

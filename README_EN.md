@@ -1,6 +1,6 @@
-# Unified MQ Broker for Go
+# QvCloud Broker
 
-Unified MQ Broker for Go is a generic message middleware adapter for Go. It provides a unified and concise API to decouple ground-level MQ implementations (such as RocketMQ, Kafka, RabbitMQ, etc.) from your business logic.
+QvCloud Broker is a generic message middleware adapter for Go. It provides a unified and concise API to decouple ground-level MQ implementations (such as RocketMQ, Kafka, RabbitMQ, etc.) from your business logic.
 
 ## Key Features
 
