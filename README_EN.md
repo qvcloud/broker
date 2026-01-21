@@ -193,3 +193,8 @@ By implementing smart paths for raw data (`[]byte`/`string`), serialization perf
 
 > **Note**: The overhead introduced by **Option Tracking** is negligible compared to network I/O latency (ms/s range). However, it significantly improves developer experience by preventing "silent failures" caused by typos or cross-platform parameter misuse.
 
+## License
+
+This project is licensed under the [MIT License](LICENSE). You are free to use, modify, and distribute this project as long as the original copyright notice is retained.
+
+

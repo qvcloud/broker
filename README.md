@@ -193,3 +193,8 @@ b.Subscribe("topic", middleware.OtelHandler(func(ctx context.Context, event brok
 | `GetTrackedValue` (读取) | 29.17 | 0 | 0 |
 
 > **注**: 选项追踪 (Option Tracking) 引入的额外开销在网络 IO 面前（秒级/毫秒级）几乎可以忽略不计，但它能显著提升开发效率，防止因配置拼写错误或跨平台参数误用导致的“静默失败”。
+
+## 开源协议
+
+本项目采用 [MIT License](LICENSE) 协议。你可以自由地使用、修改和分发本项目，只需保留原始版权声明。
+
