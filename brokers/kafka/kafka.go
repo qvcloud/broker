@@ -86,7 +86,6 @@ func (k *kafkaBroker) Connect() error {
 			TLS:  k.opts.TLSConfig,
 		},
 		BatchSize: batchSize,
-		ID:        k.opts.ClientID,
 	}
 
 	k.ctx, k.cancel = context.WithCancel(context.Background())
@@ -195,7 +194,6 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		MaxBytes:    int(maxBytes),
 		Dialer:      dialer,
 		StartOffset: offset,
-		ID:          k.opts.ClientID,
 	})
 
 	k.Lock()
