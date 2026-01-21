@@ -249,3 +249,11 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence
+
+## Phase N: Documentation & Examples (Mandatory)
+
+**Goal**: Align with Constitution Principle V
+
+- [ ] [P] [ALL] Create functional example in `examples/`
+- [ ] [P] [ALL] Update `README.md` (ZH) with new feature/driver
+- [ ] [P] [ALL] Update `README_EN.md` (EN) with new feature/driver

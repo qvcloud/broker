@@ -31,7 +31,11 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [ ] **Interface-Driven**: Does this feature adhere to the `Broker` interface?
+- [ ] **Reliability**: If a new adapter, does it support At-Least-Once delivery? (e.g. Streams/Consumer Groups)
+- [ ] **Licensing**: Are all new dependencies compatible with MIT License?
+- [ ] **Options Pattern**: Does configuration use functional options with tracked values?
+- [ ] **Doc/Ex**: Is the feature planned to have an example and dual-language documentation?
 
 ## Project Structure
 

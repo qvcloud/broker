@@ -5,7 +5,7 @@ Unified MQ Broker for Go is a generic message middleware adapter for Go. It prov
 ## Key Features
 
 - **Interface Driven**: Unified `Broker`, `Publisher`, and `Subscriber` interfaces.
-- **Multi-Driver Support**: Supports RocketMQ, Kafka, NATS, RabbitMQ, AWS SQS, GCP Pub/Sub, and more.
+- **Multi-Driver Support**: Supports RocketMQ, Kafka, NATS, RabbitMQ, Redis Streams, Redis Streams, AWS SQS, GCP Pub/Sub, and more.
 - **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
 - **Universal Model**: A vendor-agnostic message structure.
 
