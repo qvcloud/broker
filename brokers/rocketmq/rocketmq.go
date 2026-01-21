@@ -78,7 +78,9 @@ func (r *rmqBroker) Connect() error {
 				opts = append(opts, producer.WithInstanceName(r.opts.ClientID))
 			}
 			if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok && v {
-				opts = append(opts, producer.WithTrace(&primitive.TraceConfig{}))
+				opts = append(opts, producer.WithTrace(&primitive.TraceConfig{
+					NamesrvAddrs: r.opts.Addrs,
+				}))
 			}
 			// Acknowledge options used elsewhere
 			broker.GetTrackedValue(r.opts.Context, concurrencyKey{})
@@ -296,7 +298,9 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 				subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
 			}
 			if v, ok := broker.GetTrackedValue(r.opts.Context, tracingKey{}).(bool); ok && v {
-				subOpts = append(subOpts, consumer.WithTrace(&primitive.TraceConfig{}))
+				subOpts = append(subOpts, consumer.WithTrace(&primitive.TraceConfig{
+					NamesrvAddrs: r.opts.Addrs,
+				}))
 			}
 		} else if r.opts.ClientID != "" {
 			subOpts = append(subOpts, consumer.WithInstance(r.opts.ClientID))
