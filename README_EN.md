@@ -1,5 +1,9 @@
 # QvCloud Broker
 
+[![CI](https://github.com/qvcloud/broker/actions/workflows/ci.yml/badge.svg)](https://github.com/qvcloud/broker/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/qvcloud/broker)](https://goreportcard.com/report/github.com/qvcloud/broker)
+[![License](https://img.shields.io/github/license/qvcloud/broker)](LICENSE)
+
 [English](README_EN.md) | [中文](README.md)
 
 QvCloud Broker is a production-grade messaging abstraction for Go. It provides a unified API to decouple business logic from various brokers including Kafka, RabbitMQ, RocketMQ, NATS, Redis, and AWS SQS. Featuring built-in OpenTelemetry integration and engineered for high reliability.
