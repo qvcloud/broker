@@ -1,5 +1,7 @@
 # QvCloud Broker
 
+[English](README_EN.md) | [中文](README.md)
+
 QvCloud Broker 是一个生产级的 Go 语言消息中间件抽象层。它通过统一的 API 屏蔽了 Kafka、RabbitMQ、RocketMQ、NATS、Redis 和 AWS SQS 等底层差异，内置 OpenTelemetry 链路追踪，并拥有严格的代码质量保障，旨在为分布式系统提供高可靠的解耦方案。
 
 ## 核心特性
