@@ -86,10 +86,17 @@ func (k *kafkaBroker) Connect() error {
 		if v, ok := broker.GetTrackedValue(k.opts.Context, acksKey{}).(int); ok {
 			requiredAcks = kafka.RequiredAcks(v)
 		}
-		// Acknowledge options used elsewhere
-		broker.GetTrackedValue(k.opts.Context, minBytesKey{})
-		broker.GetTrackedValue(k.opts.Context, maxBytesKey{})
-		broker.GetTrackedValue(k.opts.Context, offsetKey{})
+	// Acknowledge options used elsewhere
+	broker.GetTrackedValue(k.opts.Context, minBytesKey{})
+	broker.GetTrackedValue(k.opts.Context, maxBytesKey{})
+	broker.GetTrackedValue(k.opts.Context, offsetKey{})
+	}
+
+	autoCreateTopic := false
+	if k.opts.Context != nil {
+		if v, ok := broker.GetTrackedValue(k.opts.Context, allowAutoTopicCreationKey{}).(bool); ok {
+			autoCreateTopic = v
+		}
 	}
 
 	k.writer = k.newWriter(&kafka.Writer{
@@ -100,7 +107,8 @@ func (k *kafkaBroker) Connect() error {
 			Dial: dialer.DialFunc,
 			TLS:  k.opts.TLSConfig,
 		},
-		BatchSize: batchSize,
+		BatchSize:              batchSize,
+		AllowAutoTopicCreation: autoCreateTopic,
 	})
 
 	k.ctx, k.cancel = context.WithCancel(context.Background())
@@ -356,6 +364,7 @@ type minBytesKey struct{}
 type maxBytesKey struct{}
 type offsetKey struct{}
 type acksKey struct{}
+type allowAutoTopicCreationKey struct{}
 
 func WithBatchSize(size int) broker.Option {
 	return func(o *broker.Options) {
@@ -390,6 +399,16 @@ func WithOffset(offset int64) broker.Option {
 func WithAcks(acks int) broker.Option {
 	return func(o *broker.Options) {
 		o.Context = broker.WithTrackedValue(o.Context, acksKey{}, acks, "kafka.WithAcks")
+	}
+}
+
+// WithAllowAutoTopicCreation controls whether kafka-go's Writer allows
+// the broker to auto-create topics (MetadataRequest.AllowAutoTopicCreation).
+// Defaults to false, matching kafka-go's built-in default.
+// Set to true when the broker has auto.create.topics.enable=true.
+func WithAllowAutoTopicCreation(enabled bool) broker.Option {
+	return func(o *broker.Options) {
+		o.Context = broker.WithTrackedValue(o.Context, allowAutoTopicCreationKey{}, enabled, "kafka.WithAllowAutoTopicCreation")
 	}
 }
 
