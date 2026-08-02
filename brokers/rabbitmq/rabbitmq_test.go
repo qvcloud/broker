@@ -3,6 +3,8 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,31 +14,45 @@ import (
 )
 
 type mockConn struct {
+	mu           sync.RWMutex
 	channelFunc  func() (rabbitChannel, error)
 	closeFunc    func() error
 	isClosedFunc func() bool
 }
 
 func (m *mockConn) Channel() (rabbitChannel, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.channelFunc != nil {
 		return m.channelFunc()
 	}
 	return nil, nil
 }
 func (m *mockConn) Close() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.closeFunc != nil {
 		return m.closeFunc()
 	}
 	return nil
 }
 func (m *mockConn) IsClosed() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.isClosedFunc != nil {
 		return m.isClosedFunc()
 	}
 	return false
 }
 
+func (m *mockConn) setChannelFunc(f func() (rabbitChannel, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channelFunc = f
+}
+
 type mockChannel struct {
+	mu                  sync.RWMutex
 	publishFunc         func(ctx context.Context, exchange, key string, mandatory, immediate bool, msg amqp.Publishing) error
 	consumeFunc         func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error)
 	queueDeclareFunc    func(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
@@ -56,6 +72,8 @@ func (m *mockChannel) PublishWithContext(ctx context.Context, exchange, key stri
 }
 
 func (m *mockChannel) Consume(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.consumeFunc != nil {
 		return m.consumeFunc(queue, consumer, autoAck, exclusive, noLocal, noWait, args)
 	}
@@ -63,10 +81,24 @@ func (m *mockChannel) Consume(queue, consumer string, autoAck, exclusive, noLoca
 }
 
 func (m *mockChannel) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if m.queueDeclareFunc != nil {
 		return m.queueDeclareFunc(name, durable, autoDelete, exclusive, noWait, args)
 	}
 	return amqp.Queue{}, nil
+}
+
+func (m *mockChannel) setConsumeFunc(f func(string, string, bool, bool, bool, bool, amqp.Table) (<-chan amqp.Delivery, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.consumeFunc = f
+}
+
+func (m *mockChannel) setQueueDeclareFunc(f func(string, bool, bool, bool, bool, amqp.Table) (amqp.Queue, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queueDeclareFunc = f
 }
 
 func (m *mockChannel) ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error {
@@ -118,7 +150,6 @@ func TestRabbitMQ_Connect_Disconnect(t *testing.T) {
 	mockC.channelFunc = func() (rabbitChannel, error) {
 		return mockCh, nil
 	}
-
 	err := b.Connect()
 	assert.NoError(t, err)
 	assert.True(t, r.running)
@@ -410,27 +441,28 @@ func TestRabbitMQ_Reconnection(t *testing.T) {
 	mockC := &mockConn{}
 	mockCh := &mockChannel{}
 
-	dialCount := 0
+	var dialCount atomic.Int32
+	var closed atomic.Bool
 	r.newConn = func(addr string, config amqp.Config) (rabbitConn, error) {
-		dialCount++
+		dialCount.Add(1)
 		return mockC, nil
 	}
 	mockC.channelFunc = func() (rabbitChannel, error) {
 		return mockCh, nil
 	}
+	mockC.isClosedFunc = closed.Load
 
 	err := b.Connect()
 	assert.NoError(t, err)
 
 	// Simulate connection loss
-	mockC.isClosedFunc = func() bool { return true }
+	closed.Store(true)
 
 	// Wait for reconnection
 	time.Sleep(time.Millisecond * 50)
 
-	r.RLock()
-	assert.True(t, dialCount > 1)
-	r.RUnlock()
+	assert.Greater(t, dialCount.Load(), int32(1))
+	assert.NoError(t, b.Disconnect())
 }
 
 func TestRabbitMQ_Errors(t *testing.T) {
@@ -478,12 +510,12 @@ func TestRabbitMQ_Detailed_Subscribe_Errors(t *testing.T) {
 	mockCh1 := &mockChannel{
 		deliveries: make(chan amqp.Delivery, 10),
 	}
-	mockC.channelFunc = func() (rabbitChannel, error) { return mockCh1, nil }
+	mockC.setChannelFunc(func() (rabbitChannel, error) { return mockCh1, nil })
 
 	// 1. QueueDeclare Error
-	mockCh1.queueDeclareFunc = func(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	mockCh1.setQueueDeclareFunc(func(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
 		return amqp.Queue{}, fmt.Errorf("queue fail")
-	}
+	})
 
 	sub, err := b.Subscribe("test", func(ctx context.Context, event broker.Event) error {
 		return nil
@@ -491,14 +523,14 @@ func TestRabbitMQ_Detailed_Subscribe_Errors(t *testing.T) {
 	assert.NoError(t, err)
 
 	time.Sleep(50 * time.Millisecond) // Wait for runSubscriber to fail and loop
-	mockCh1.queueDeclareFunc = nil
+	mockCh1.setQueueDeclareFunc(nil)
 
 	// 2. Consume Error
-	mockCh1.consumeFunc = func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
+	mockCh1.setConsumeFunc(func(queue, consumer string, autoAck, exclusive, noLocal, noWait bool, args amqp.Table) (<-chan amqp.Delivery, error) {
 		return nil, fmt.Errorf("consume fail")
-	}
+	})
 	time.Sleep(50 * time.Millisecond)
-	mockCh1.consumeFunc = nil
+	mockCh1.setConsumeFunc(nil)
 
 	sub.Unsubscribe()
 	time.Sleep(50 * time.Millisecond)
@@ -512,7 +544,7 @@ func TestRabbitMQ_Detailed_Subscribe_Errors(t *testing.T) {
 		close(consumeCalled)
 		return mockCh2.deliveries, nil
 	}
-	mockC.channelFunc = func() (rabbitChannel, error) { return mockCh2, nil }
+	mockC.setChannelFunc(func() (rabbitChannel, error) { return mockCh2, nil })
 
 	// 3. Handler Error
 	done := make(chan bool)

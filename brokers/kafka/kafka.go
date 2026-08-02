@@ -86,10 +86,10 @@ func (k *kafkaBroker) Connect() error {
 		if v, ok := broker.GetTrackedValue(k.opts.Context, acksKey{}).(int); ok {
 			requiredAcks = kafka.RequiredAcks(v)
 		}
-	// Acknowledge options used elsewhere
-	broker.GetTrackedValue(k.opts.Context, minBytesKey{})
-	broker.GetTrackedValue(k.opts.Context, maxBytesKey{})
-	broker.GetTrackedValue(k.opts.Context, offsetKey{})
+		// Acknowledge options used elsewhere
+		broker.GetTrackedValue(k.opts.Context, minBytesKey{})
+		broker.GetTrackedValue(k.opts.Context, maxBytesKey{})
+		broker.GetTrackedValue(k.opts.Context, offsetKey{})
 	}
 
 	autoCreateTopic := false

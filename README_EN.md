@@ -6,7 +6,7 @@
 
 [English](README_EN.md) | [中文](README.md)
 
-QvCloud Broker is a production-grade messaging abstraction for Go. It provides a unified API to decouple business logic from various brokers including Kafka, RabbitMQ, RocketMQ, NATS, Redis, and AWS SQS. Featuring built-in OpenTelemetry integration and engineered for high reliability.
+QvCloud Broker is a production-oriented messaging abstraction for Go. It provides a unified API for Kafka, RabbitMQ, RocketMQ, NATS, Redis, AWS SQS, and GCP Pub/Sub, with built-in OpenTelemetry integration. Before production adoption, validate the selected adapter against a real broker deployment and the expected workload.
 
 ## Key Features
 
@@ -14,14 +14,14 @@ QvCloud Broker is a production-grade messaging abstraction for Go. It provides a
 - **Multi-Driver Support**:
     | Driver | Status | Coverage | Description |
     | :--- | :--- | :--- | :--- |
-    | **Core Framework** | ✅ Ready | **89.4%** | Core logic & Global Options |
-    | **AWS SQS** | ✅ Ready | **94.6%** | Amazon Simple Queue Service |
-    | **NATS** | ✅ Ready | **91.7%** | High-performance messaging system |
-    | **Redis** | ✅ Ready | **91.6%** | Based on **Streams** (Consumer Group) |
-    | **RocketMQ** | ✅ Ready | **83.6%** | Alibaba / Native RocketMQ |
-    | **RabbitMQ** | ✅ Ready | **82.7%** | Standard AMQP protocol |
-    | **Kafka** | ✅ Ready | **82.4%** | High-performance implementation via sarama |
-    | **GCP Pub/Sub** | ✅ Supported | **22.3%** | Google Cloud Pub/Sub |
+    | **Core Framework** | ✅ Unit tested | **89.4%** | Core logic & Global Options |
+    | **AWS SQS** | ✅ Unit tested | **94.6%** | Amazon Simple Queue Service |
+    | **NATS** | ✅ Unit tested | **91.7%** | High-performance messaging system |
+    | **Redis** | ✅ Unit tested | **91.7%** | Based on **Streams** (Consumer Group) |
+    | **RocketMQ** | ✅ Unit tested | **83.6%** | Alibaba / Native RocketMQ |
+    | **RabbitMQ** | ✅ Unit tested | **79.9%** | Standard AMQP protocol |
+    | **Kafka** | ✅ Unit tested | **81.0%** | Based on `segmentio/kafka-go` |
+    | **GCP Pub/Sub** | 🧪 Improving | **62.0%** | Google Cloud Pub/Sub |
 - **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
 - **Universal Model**: A vendor-agnostic message structure.
 
@@ -30,7 +30,6 @@ QvCloud Broker is a production-grade messaging abstraction for Go. It provides a
 ```
 .
 ├── broker.go          // Core interface definitions
-├── message.go         // Unified message structure
 ├── options.go         // Unified configuration options
 ├── json.go            // Default JSON codec
 ├── noop_broker.go     // Mock implementation (for testing)
@@ -45,6 +44,20 @@ QvCloud Broker is a production-grade messaging abstraction for Go. It provides a
 │   └── pubsub/        // GCP Pub/Sub
 └── examples/          // Usage examples
 ```
+
+## Quality Checks
+
+```bash
+make test      # Unit tests
+make race      # Go race detector
+make coverage  # Combined coverage report
+make lint      # golangci-lint or go vet
+make integration-test # Docker end-to-end tests
+```
+
+`make integration-test` starts pinned Kafka 3.9, RabbitMQ 3.13, NATS 2.10, and Redis 7.4 containers; verifies real connections, publishing, consumption, message bodies, and headers; then removes the containers and volumes. Override the defaults with `BROKER_KAFKA_ADDR`, `BROKER_RABBITMQ_ADDR`, `BROKER_NATS_ADDR`, or `BROKER_REDIS_ADDR`.
+
+CI also runs the Docker integration suite, scans dependencies for known vulnerabilities, and enforces at least 75% repository-wide statement coverage. Before production rollout, still validate TLS, reconnection, DLQ, duplicate delivery, capacity, and graceful shutdown against the target broker version. RocketMQ, SQS, and GCP Pub/Sub are not part of the local Docker suite.
 
 ## Quick Start
 
@@ -235,5 +248,3 @@ By implementing smart paths for raw data (`[]byte`/`string`), serialization perf
 ## License
 
 This project is licensed under the [MIT License](LICENSE). You are free to use, modify, and distribute this project as long as the original copyright notice is retained.
-
-

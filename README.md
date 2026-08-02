@@ -6,7 +6,7 @@
 
 [English](README_EN.md) | [中文](README.md)
 
-QvCloud Broker 是一个生产级的 Go 语言消息中间件抽象层。它通过统一的 API 屏蔽了 Kafka、RabbitMQ、RocketMQ、NATS、Redis 和 AWS SQS 等底层差异，内置 OpenTelemetry 链路追踪，并拥有严格的代码质量保障，旨在为分布式系统提供高可靠的解耦方案。
+QvCloud Broker 是一个面向生产场景的 Go 语言消息中间件抽象层。它通过统一的 API 屏蔽 Kafka、RabbitMQ、RocketMQ、NATS、Redis、AWS SQS 和 GCP Pub/Sub 等底层差异，并内置 OpenTelemetry 链路追踪。生产采用前仍应针对选定的消息系统完成真实环境集成测试和容量验证。
 
 ## 核心特性
 
@@ -14,14 +14,14 @@ QvCloud Broker 是一个生产级的 Go 语言消息中间件抽象层。它通�
 - **多驱动支持**:
     | 驱动 (Driver) | 状态 (Status) | 测试覆盖率 (Coverage) | 说明 (Description) |
     | :--- | :--- | :--- | :--- |
-    | **Core Framework** | ✅ 生产就绪 | **89.4%** | 库核心逻辑与通用 Options |
-    | **AWS SQS** | ✅ 生产就绪 | **94.6%** | 亚马逊云队列服务 |
-    | **NATS** | ✅ 生产就绪 | **91.7%** | 高性能消息系统 |
-    | **Redis** | ✅ 生产就绪 | **91.6%** | 基于 **Streams** (Consumer Group) |
-    | **RocketMQ** | ✅ 生产就绪 | **83.6%** | 阿里云/原生 RocketMQ |
-    | **RabbitMQ** | ✅ 生产就绪 | **82.7%** | 标准 AMQP 协议 |
-    | **Kafka** | ✅ 生产就绪 | **82.4%** | 基于 sarama 的高并发实现 |
-    | **GCP Pub/Sub** | ✅ 已支持 | **22.3%** | 谷歌云发布订阅 |
+    | **Core Framework** | ✅ 单元测试验证 | **89.4%** | 库核心逻辑与通用 Options |
+    | **AWS SQS** | ✅ 单元测试验证 | **94.6%** | 亚马逊云队列服务 |
+    | **NATS** | ✅ 单元测试验证 | **91.7%** | 高性能消息系统 |
+    | **Redis** | ✅ 单元测试验证 | **91.7%** | 基于 **Streams** (Consumer Group) |
+    | **RocketMQ** | ✅ 单元测试验证 | **83.6%** | 阿里云/原生 RocketMQ |
+    | **RabbitMQ** | ✅ 单元测试验证 | **79.9%** | 标准 AMQP 协议 |
+    | **Kafka** | ✅ 单元测试验证 | **81.0%** | 基于 `segmentio/kafka-go` |
+    | **GCP Pub/Sub** | 🧪 持续完善 | **62.0%** | 谷歌云发布订阅 |
 - **可扩展性**: 插件化架构，轻松接入新的 MQ 实现。
 - **统一模型**: 厂商无关的消息模型。
 
@@ -30,7 +30,6 @@ QvCloud Broker 是一个生产级的 Go 语言消息中间件抽象层。它通�
 ```
 .
 ├── broker.go          // 核心接口定义
-├── message.go         // 统一消息结构
 ├── options.go         // 统一配置项
 ├── json.go            // 默认 JSON 编解码器
 ├── noop_broker.go     // 空实现（用于测试）
@@ -45,6 +44,20 @@ QvCloud Broker 是一个生产级的 Go 语言消息中间件抽象层。它通�
 │   └── pubsub/        // GCP Pub/Sub
 └── examples/          // 使用示例
 ```
+
+## 质量验证
+
+```bash
+make test      # 单元测试
+make race      # Go 竞态检测
+make coverage  # 合并覆盖率报告
+make lint      # golangci-lint 或 go vet
+make integration-test # Docker 端到端测试
+```
+
+`make integration-test` 会启动固定版本的 Kafka 3.9、RabbitMQ 3.13、NATS 2.10 和 Redis 7.4，验证真实的连接、发布、消费、消息正文及消息头传递，随后自动删除容器和卷。可通过 `BROKER_KAFKA_ADDR`、`BROKER_RABBITMQ_ADDR`、`BROKER_NATS_ADDR`、`BROKER_REDIS_ADDR` 覆盖默认地址。
+
+CI 还会执行 Docker 集成测试、依赖漏洞扫描，并要求全仓语句覆盖率不低于 75%。生产上线前仍应使用目标 Broker 版本验证 TLS、断线重连、DLQ、重复投递、容量和优雅停机；RocketMQ、SQS 与 GCP Pub/Sub 不包含在本地 Docker 套件中。
 
 ## 快速开始
 
@@ -260,4 +273,3 @@ b.Connect()
 ## 开源协议
 
 本项目采用 [MIT License](LICENSE) 协议。你可以自由地使用、修改和分发本项目，只需保留原始版权声明。
-

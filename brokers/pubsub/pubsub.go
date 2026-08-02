@@ -45,8 +45,9 @@ func (r *realPubSubProvider) Close() error {
 }
 
 type pubsubBroker struct {
-	opts     broker.Options
-	provider pubsubProvider
+	opts        broker.Options
+	provider    pubsubProvider
+	newProvider func(context.Context, string) (pubsubProvider, error)
 
 	sync.RWMutex
 	running bool
@@ -83,12 +84,16 @@ func (p *pubsubBroker) Connect() error {
 		return fmt.Errorf("project ID must be provided in Addrs")
 	}
 
-	client, err := pubsub.NewClient(context.Background(), projectID)
+	ctx := p.opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, err := p.newProvider(ctx, projectID)
 	if err != nil {
 		return err
 	}
 
-	p.provider = &realPubSubProvider{client: client}
+	p.provider = client
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.running = true
 
@@ -110,12 +115,13 @@ func (p *pubsubBroker) Disconnect() error {
 		p.cancel()
 	}
 
+	var closeErr error
 	if p.provider != nil {
-		p.provider.Close()
+		closeErr = p.provider.Close()
 	}
-
+	p.provider = nil
 	p.running = false
-	return nil
+	return closeErr
 }
 
 func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
@@ -250,6 +256,13 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &pubsubBroker{
 		opts: *options,
+		newProvider: func(ctx context.Context, projectID string) (pubsubProvider, error) {
+			client, err := pubsub.NewClient(ctx, projectID)
+			if err != nil {
+				return nil, err
+			}
+			return &realPubSubProvider{client: client}, nil
+		},
 	}
 }
 
