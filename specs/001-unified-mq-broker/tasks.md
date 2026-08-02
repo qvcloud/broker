@@ -73,3 +73,24 @@ Phase 1 -> Phase 2 -> Phase 3 -> Phase 4/5/6 -> Phase 7
 
 ## Parallel Execution Examples
 - Phase 4, Phase 5, and Phase 6 can run in parallel after Phase 2 is complete.
+
+## Phase 8: Convergence
+
+- [ ] T028 CRITICAL Correct RabbitMQ framework-level AutoAck so handler success acknowledges and handler failure requeues under the default configuration in `brokers/rabbitmq/rabbitmq.go` and add unit/integration regression tests per Constitution II (contradicts)
+- [ ] T029 CRITICAL Propagate the subscription/message context into Redis `Ack()` and `Nack()` instead of using `context.Background()` in `brokers/redis/redis.go` and cover cancellation behavior per Constitution III (contradicts)
+- [ ] T030 CRITICAL Add synchronized broker-owned goroutine lifecycle tracking and bounded graceful shutdown for subscribers, handlers, and reconnect loops across `brokers/` so `Disconnect()` releases all resources before returning per Constitution III (partial)
+- [ ] T031 Add connected-state and nil-message validation to every adapter, including preventing Kafka `Publish()` from dereferencing a nil writer and making Kafka `Connect()` verify broker availability in `brokers/kafka/kafka.go`, per FR-009 and Constitution III (partial)
+- [ ] T032 Implement producer and consumer OpenTelemetry spans with trace-context injection/extraction for every real adapter in `brokers/` and verify publish-to-handler span linkage per US4 and Constitution IV (missing)
+- [ ] T033 Implement `Options.Meter` metrics for publish, consume, Ack/Nack, errors, retries, reconnects, and latency across real adapters with deterministic tests in `brokers/` and `middleware/` per US4 and Constitution IV (missing)
+- [ ] T034 Apply `Options.ErrorHandler`, Logger, ClientID, TLSConfig, tracer, meter, and context consistently where supported by every adapter, returning or warning on unsupported common options, per FR-003 and Constitution IV (partial)
+- [ ] T035 Configure `JsonMarshaler` as the default codec and verify smart serialization/transparent byte passthrough is consistently applied or explicitly documented for all adapters in `options.go`, `json.go`, and `brokers/` per FR-004 and the serialization clarification (partial)
+- [ ] T036 Track common publish and subscribe options such as Delay, Tags, DeadLetterQueue, Secure, and Codec so unsupported adapters emit Logger warnings and non-native async requests fall back synchronously with warnings per FR-006 and FR-008 (partial)
+- [ ] T037 Add a reproducible RocketMQ real-service publish/subscribe integration test and CI or documented external execution path in `integration/` per US2 independent test and Constitution VI (missing)
+- [ ] T038 Raise and enforce test coverage to 100% for core interfaces and at least 80% for every adapter, adding direct tests for Pub/Sub, RabbitMQ, and uncovered core behavior per SC-003 (partial)
+- [ ] T039 Extend `integration/docker_test.go` with handler-failure redelivery, explicit Ack, `Nack(true)`, `Nack(false)`, broker restart/reconnect, and graceful-shutdown scenarios for Kafka, RabbitMQ, NATS, and Redis per Constitution II and Quality Gates (missing)
+- [ ] T040 Preserve actual `SubscribeOptions` in Redis subscribers, remove closed Kafka readers from the broker registry, propagate all close errors, and make repeated Unsubscribe/Disconnect behavior deterministic in `brokers/redis/redis.go`, `brokers/kafka/kafka.go`, and other affected adapters per Constitution III (partial)
+- [ ] T041 Replace unconditional retry sleeps with cancelable exponential backoff and jitter, classify permanent versus transient errors, and test cancellation in Kafka, RabbitMQ, Redis, and SQS loops per Constitution III (partial)
+- [ ] T042 Align `README.md`, `README_EN.md`, and `ADAPTER_EXTENSIONS.md` with the implemented public interfaces and exact per-adapter AutoAck/Ack/Nack semantics, including removing the nonexistent Publisher interface claim, per Constitution II and VI (contradicts)
+- [ ] T043 Add reproducible native-SDK comparison benchmarks and enforce or revise the documented API-overhead target in benchmark files and both README files per SC-001 and Constitution VI (missing)
+- [ ] T044 Add real-service or emulator validation plans and strongest available contract tests for SQS and GCP Pub/Sub, documenting credentials, limitations, and pre-production verification in `integration/` and both README files per Constitution VI and Quality Gates (missing)
+- [ ] T045 Update every example under `examples/` to handle Connect, Publish, Subscribe, Unsubscribe, and Disconnect errors and add an example compilation check to CI per Constitution VI Development Workflow (partial)
