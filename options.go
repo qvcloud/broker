@@ -38,6 +38,10 @@ type Options struct {
 
 	// ClientID is a unique identifier for the client.
 	ClientID string
+
+	// Observability configures optional diagnostics. Nil keeps every new
+	// observability category disabled.
+	Observability *ObservabilityConfig
 }
 
 // Logger is a simple logging interface.
@@ -147,6 +151,20 @@ func WithContext(ctx context.Context) Option {
 func WithLogger(l Logger) Option {
 	return func(o *Options) {
 		o.Logger = l
+	}
+}
+
+// WithObservability configures optional broker observability. Categories are
+// still disabled unless explicitly enabled.
+func WithObservability(opts ...ObservabilityOption) Option {
+	return func(o *Options) {
+		cfg := defaultObservabilityConfig()
+		for _, opt := range opts {
+			if opt != nil {
+				opt(&cfg)
+			}
+		}
+		o.Observability = &cfg
 	}
 }
 

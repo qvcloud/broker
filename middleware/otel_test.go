@@ -48,3 +48,13 @@ func TestOtelHandler(t *testing.T) {
 	}
 	assert.True(t, foundTopic)
 }
+
+func TestOtelHandlerAvoidsDuplicateConsumerSpan(t *testing.T) {
+	sr := tracetest.NewSpanRecorder()
+	tp := trace.NewTracerProvider(trace.WithSpanProcessor(sr))
+	tracer := tp.Tracer("test")
+	inner := OtelHandler(func(context.Context, broker.Event) error { return nil }, WithTracer(tracer))
+	outer := OtelHandler(inner, WithTracer(tracer))
+	assert.NoError(t, outer(context.Background(), &mockEvent{topic: "topic"}))
+	assert.Len(t, sr.Ended(), 1)
+}

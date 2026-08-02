@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -70,7 +71,9 @@ func (e *noopEvent) Error() error {
 }
 
 type noopBroker struct {
-	opts *Options
+	opts   *Options
+	obs    *Runtime
+	obsErr error
 	sync.RWMutex
 	Subscribers map[string][]*noopSubscriber
 	connected   bool
@@ -85,9 +88,15 @@ func (b *noopBroker) Address() string {
 }
 
 func (b *noopBroker) Connect() error {
+	if b.obsErr != nil {
+		return b.obsErr
+	}
+	b.obs.Start()
+	b.obs.Transition(StateConnecting, false, false, nil)
 	b.Lock()
 	defer b.Unlock()
 	b.connected = true
+	b.obs.Transition(StateReady, true, true, nil)
 	WarnUnconsumed(b.opts.Context, b.opts.Logger)
 	return nil
 }
@@ -96,6 +105,8 @@ func (b *noopBroker) Disconnect() error {
 	b.Lock()
 	defer b.Unlock()
 	b.connected = false
+	b.obs.Transition(StateStopped, false, false, nil)
+	b.obs.Close()
 	return nil
 }
 
@@ -103,14 +114,26 @@ func (b *noopBroker) Init(opts ...Option) error {
 	for _, opt := range opts {
 		opt(b.opts)
 	}
-	return nil
+	b.obs, b.obsErr = NewRuntime("noop", b.opts.Observability)
+	return b.obsErr
 }
+
+func (b *noopBroker) Observability() Observability { return b.obs }
 
 func (b *noopBroker) String() string {
 	return "noop"
 }
 
 func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, opts ...PublishOption) error {
+	instrument := b.obs.OperationsEnabled()
+	var started time.Time
+	if instrument {
+		started = b.obs.StartOperation(OperationPublish)
+	}
+	var resultErr error
+	if instrument {
+		defer func() { b.obs.Observe(OperationPublish, started, resultErr) }()
+	}
 	options := PublishOptions{
 		Context: ctx,
 	}
@@ -139,14 +162,21 @@ func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, op
 	}
 
 	var v any
+	message := msg
+	if msg != nil && b.obs.Enabled(CategoryCorrelation) {
+		copy := *msg
+		copy.Header = b.obs.InjectContext(ctx, msg.Header)
+		message = &copy
+	}
 	if b.opts.Codec != nil {
-		buf, err := b.opts.Codec.Marshal(msg)
+		buf, err := b.opts.Codec.Marshal(message)
 		if err != nil {
+			resultErr = err
 			return err
 		}
 		v = buf
 	} else {
-		v = msg
+		v = message
 	}
 
 	var wg sync.WaitGroup
@@ -154,15 +184,31 @@ func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, op
 		wg.Add(1)
 		go func(sub *noopSubscriber, wg *sync.WaitGroup) {
 			defer wg.Done()
+			handlerInstrument := b.obs.OperationsEnabled()
+			var handlerStarted time.Time
+			if handlerInstrument {
+				handlerStarted = b.obs.StartOperation(OperationHandler)
+			}
 			p := &noopEvent{
 				topic:   topic,
 				message: v,
 				opts:    b.opts,
 			}
-			if err := sub.handler(ctx, p); err != nil {
+			handlerCtx := ctx
+			if message := p.Message(); message != nil {
+				handlerCtx = b.obs.ExtractContext(ctx, message.Header)
+			}
+			if err := sub.handler(handlerCtx, p); err != nil {
+				if handlerInstrument {
+					b.obs.Observe(OperationHandler, handlerStarted, err)
+				}
 				p.err = err
 				if eh := b.opts.ErrorHandler; eh != nil {
 					_ = eh(ctx, p)
+				}
+			} else {
+				if handlerInstrument {
+					b.obs.Observe(OperationHandler, handlerStarted, nil)
 				}
 			}
 		}(sub, &wg)
@@ -172,6 +218,8 @@ func (b *noopBroker) Publish(ctx context.Context, topic string, msg *Message, op
 }
 
 func (b *noopBroker) Subscribe(topic string, handler Handler, opts ...SubscribeOption) (Subscriber, error) {
+	started := b.obs.StartOperation(OperationSubscribe)
+	defer b.obs.Observe(OperationSubscribe, started, nil)
 	options := NewSubscribeOptions(opts...)
 
 	sub := &noopSubscriber{
@@ -188,6 +236,7 @@ func (b *noopBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 	}
 	b.Subscribers[topic] = append(b.Subscribers[topic], sub)
 	b.Unlock()
+	b.obs.AddSubscription(1)
 
 	go func() {
 		<-sub.exit
@@ -201,6 +250,7 @@ func (b *noopBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 		}
 		b.Subscribers[topic] = newSubscribers
 		b.Unlock()
+		b.obs.AddSubscription(-1)
 	}()
 
 	return sub, nil
@@ -208,9 +258,12 @@ func (b *noopBroker) Subscribe(topic string, handler Handler, opts ...SubscribeO
 
 func NewNoopBroker(opts ...Option) Broker {
 	options := NewOptions(opts...)
+	observability, err := NewRuntime("noop", options.Observability)
 
 	return &noopBroker{
 		opts:        options,
+		obs:         observability,
+		obsErr:      err,
 		Subscribers: make(map[string][]*noopSubscriber),
 	}
 }

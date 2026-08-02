@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,11 +17,17 @@ import (
 	"github.com/qvcloud/broker/brokers/rabbitmq"
 	"github.com/qvcloud/broker/brokers/redis"
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const integrationTimeout = 30 * time.Second
 
 func TestDockerBrokersPublishSubscribe(t *testing.T) {
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previousPropagator) })
 	tests := []struct {
 		name         string
 		newBroker    func() broker.Broker
@@ -32,6 +40,7 @@ func TestDockerBrokersPublishSubscribe(t *testing.T) {
 			newBroker: func() broker.Broker {
 				return kafka.NewBroker(
 					broker.Addrs(env("BROKER_KAFKA_ADDR", "127.0.0.1:19092")),
+					observabilityOptions(),
 					kafka.WithAllowAutoTopicCreation(true),
 					kafka.WithMinBytes(1),
 				)
@@ -43,6 +52,7 @@ func TestDockerBrokersPublishSubscribe(t *testing.T) {
 			newBroker: func() broker.Broker {
 				return rabbitmq.NewBroker(
 					broker.Addrs(env("BROKER_RABBITMQ_ADDR", "amqp://guest:guest@127.0.0.1:15672/")),
+					observabilityOptions(),
 					rabbitmq.WithDurable(false),
 					rabbitmq.WithAutoDelete(true),
 				)
@@ -53,13 +63,13 @@ func TestDockerBrokersPublishSubscribe(t *testing.T) {
 		{
 			name: "nats",
 			newBroker: func() broker.Broker {
-				return nats.NewBroker(broker.Addrs(env("BROKER_NATS_ADDR", "nats://127.0.0.1:14222")))
+				return nats.NewBroker(broker.Addrs(env("BROKER_NATS_ADDR", "nats://127.0.0.1:14222")), observabilityOptions())
 			},
 		},
 		{
 			name: "redis",
 			newBroker: func() broker.Broker {
-				return redis.NewBroker(broker.Addrs(env("BROKER_REDIS_ADDR", "127.0.0.1:16379")))
+				return redis.NewBroker(broker.Addrs(env("BROKER_REDIS_ADDR", "127.0.0.1:16379")), observabilityOptions())
 			},
 		},
 	}
@@ -77,6 +87,13 @@ func runPublishSubscribe(t *testing.T, b broker.Broker, prepare func(*testing.T,
 	if err := b.Connect(); err != nil {
 		t.Fatalf("connect %s: %v", b.String(), err)
 	}
+	observable, ok := b.(broker.Observable)
+	if !ok {
+		t.Fatalf("%s does not expose observability", b.String())
+	}
+	if health := observable.Observability().Health(); !health.Connected || !health.Ready || health.State != broker.StateReady {
+		t.Fatalf("%s health after connect: %+v", b.String(), health)
+	}
 	t.Cleanup(func() {
 		if err := b.Disconnect(); err != nil {
 			t.Errorf("disconnect %s: %v", b.String(), err)
@@ -92,10 +109,14 @@ func runPublishSubscribe(t *testing.T, b broker.Broker, prepare func(*testing.T,
 	if prepare != nil {
 		prepare(t, topic)
 	}
-	opts := append([]broker.SubscribeOption{broker.WithQueue(queue)}, subOpts...)
+	opts := append([]broker.SubscribeOption{broker.WithQueue(queue), broker.DisableAutoAck()}, subOpts...)
 
 	received := make(chan *broker.Message, 1)
+	ackResult := make(chan error, 1)
+	correlated := make(chan bool, 1)
 	sub, err := b.Subscribe(topic, func(ctx context.Context, event broker.Event) error {
+		ackResult <- event.Ack()
+		correlated <- trace.SpanContextFromContext(ctx).IsValid()
 		select {
 		case received <- event.Message():
 		default:
@@ -105,11 +126,15 @@ func runPublishSubscribe(t *testing.T, b broker.Broker, prepare func(*testing.T,
 	if err != nil {
 		t.Fatalf("subscribe %s: %v", b.String(), err)
 	}
-	t.Cleanup(func() {
-		if err := sub.Unsubscribe(); err != nil {
-			t.Errorf("unsubscribe %s: %v", b.String(), err)
-		}
-	})
+	var unsubscribeOnce sync.Once
+	unsubscribe := func() {
+		unsubscribeOnce.Do(func() {
+			if err := sub.Unsubscribe(); err != nil {
+				t.Errorf("unsubscribe %s: %v", b.String(), err)
+			}
+		})
+	}
+	t.Cleanup(unsubscribe)
 
 	// Give push-based consumers time to register before publishing. Kafka and
 	// Redis tolerate publishing earlier, but NATS intentionally does not buffer.
@@ -120,8 +145,13 @@ func runPublishSubscribe(t *testing.T, b broker.Broker, prepare func(*testing.T,
 		Header: map[string]string{"integration-id": suffix},
 		Body:   []byte("docker-integration-" + b.String()),
 	}
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled, Remote: true})
+	ctx = trace.ContextWithSpanContext(ctx, spanContext)
 	if err := publishWithRetry(ctx, b, topic, want); err != nil {
 		t.Fatalf("publish %s: %v", b.String(), err)
+	}
+	if total := observable.Observability().Snapshot().OperationTotals["publish:success"]; total == 0 {
+		t.Fatalf("%s did not record successful publish", b.String())
 	}
 
 	select {
@@ -135,6 +165,81 @@ func runPublishSubscribe(t *testing.T, b broker.Broker, prepare func(*testing.T,
 	case <-ctx.Done():
 		t.Fatalf("%s delivery timed out: %v", b.String(), ctx.Err())
 	}
+	select {
+	case <-ackResult:
+	case <-ctx.Done():
+		t.Fatalf("%s ack result timed out", b.String())
+	}
+	if !<-correlated {
+		t.Fatalf("%s did not restore trace correlation", b.String())
+	}
+	ackTotals := observable.Observability().Snapshot().OperationTotals["ack:success"] + observable.Observability().Snapshot().OperationTotals["ack:failure"]
+	if ackTotals == 0 {
+		t.Fatalf("%s did not observe native Ack outcome", b.String())
+	}
+
+	// A handler failure and native Nack must be observable without replacing the
+	// adapter's original error or requeue decision.
+	failureTopic := topic + "-failure"
+	if prepare != nil {
+		prepare(t, failureTopic)
+	}
+	failureSeen := make(chan struct{}, 1)
+	failureQueue := queue + "-failure"
+	if queueIsTopic {
+		failureQueue = failureTopic
+	}
+	failureSub, err := b.Subscribe(failureTopic, func(_ context.Context, event broker.Event) error {
+		_ = event.Nack(false)
+		select {
+		case failureSeen <- struct{}{}:
+		default:
+		}
+		return fmt.Errorf("integration handler failure")
+	}, append([]broker.SubscribeOption{broker.WithQueue(failureQueue), broker.DisableAutoAck()}, subOpts...)...)
+	if err != nil {
+		t.Fatalf("failure subscribe %s: %v", b.String(), err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := publishWithRetry(ctx, b, failureTopic, &broker.Message{Body: []byte("not-for-observability")}); err != nil {
+		t.Fatalf("failure publish %s: %v", b.String(), err)
+	}
+	select {
+	case <-failureSeen:
+	case <-ctx.Done():
+		t.Fatalf("%s handler failure timed out", b.String())
+	}
+	_ = failureSub.Unsubscribe()
+	snapshot := observable.Observability().Snapshot()
+	if snapshot.OperationTotals["handler:failure"] == 0 || snapshot.OperationTotals["nack:success"]+snapshot.OperationTotals["nack:failure"] == 0 {
+		t.Fatalf("%s missing handler/Nack outcomes: %+v", b.String(), snapshot.OperationTotals)
+	}
+
+	// Deterministic manual recovery exercises stopped -> connecting -> ready.
+	unsubscribe()
+	if err := b.Disconnect(); err != nil {
+		t.Fatalf("recovery disconnect %s: %v", b.String(), err)
+	}
+	if err := b.Connect(); err != nil {
+		t.Fatalf("recovery connect %s: %v", b.String(), err)
+	}
+	if health := observable.Observability().Health(); !health.Ready || health.State != broker.StateReady {
+		t.Fatalf("%s health after recovery: %+v", b.String(), health)
+	}
+	beforeDisabled := observable.Observability().Snapshot().OperationTotals
+	if err := observable.Observability().SetCategories(0); err != nil {
+		t.Fatalf("disable observability %s: %v", b.String(), err)
+	}
+	if err := publishWithRetry(ctx, b, topic+"-disabled", &broker.Message{Body: []byte("disabled-body")}); err != nil {
+		t.Fatalf("disabled publish %s: %v", b.String(), err)
+	}
+	if after := observable.Observability().Snapshot().OperationTotals; !reflect.DeepEqual(after, beforeDisabled) {
+		t.Fatalf("%s emitted diagnostics while disabled: before=%v after=%v", b.String(), beforeDisabled, after)
+	}
+}
+
+func observabilityOptions() broker.Option {
+	return broker.WithObservability(broker.EnableCategories(broker.CategoryHealth, broker.CategoryDiagnostics, broker.CategoryCorrelation))
 }
 
 func prepareKafkaTopic(t *testing.T, topic string) {

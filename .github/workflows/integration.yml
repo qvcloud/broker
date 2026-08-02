@@ -16,10 +16,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24"
           cache: true
@@ -28,11 +28,38 @@ jobs:
         run: make integration-up
 
       - name: Run Docker integration tests
-        run: go test -tags=integration -count=1 -v ./integration
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=integration -count=1 -v ./integration 2>&1 | tee integration-test.log
+
+      - name: Reject sensitive observability output
+        if: always()
+        shell: bash
+        run: |
+          sed -E 's/((authorization|password|secret|token|api[-_]?key)[=:])[[:graph:]]+/\1[REDACTED]/Ig' integration-test.log > sanitized-integration-test.log
+          if grep -Eiq '(authorization|password|secret|token|api[-_]?key)[=:][^[:space:]]+' integration-test.log; then
+            echo 'Sensitive-looking value found in integration output'
+            exit 1
+          fi
 
       - name: Show container logs on failure
         if: failure()
-        run: docker compose -f docker-compose.integration.yml logs --no-color
+        shell: bash
+        run: |
+          docker compose -f docker-compose.integration.yml logs --no-color 2>&1 \
+            | sed -E 's/((authorization|password|secret|token|api[-_]?key)[=:])[[:graph:]]+/\1[REDACTED]/Ig' \
+            | tee sanitized-container.log
+
+      - name: Upload sanitized failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sanitized-integration-logs
+          path: |
+            sanitized-integration-test.log
+            sanitized-container.log
+          if-no-files-found: ignore
 
       - name: Clean up containers
         if: always()

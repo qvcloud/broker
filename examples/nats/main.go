@@ -18,7 +18,7 @@ func main() {
 	if err := b.Connect(); err != nil {
 		log.Fatalf("Connect error: %v", err)
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 
 	// Subscribe
 	_, err := b.Subscribe("test_subject", func(ctx context.Context, event broker.Event) error {

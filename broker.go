@@ -2,7 +2,15 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"sync"
+)
+
+var (
+	// ErrUnsupported indicates that a broker cannot provide an optional capability.
+	ErrUnsupported = errors.New("broker: observability capability unsupported")
+	// ErrInvalidObservabilityConfig indicates invalid observability configuration.
+	ErrInvalidObservabilityConfig = errors.New("broker: invalid observability configuration")
 )
 
 // Broker is an interface used for asynchronous messaging.
@@ -26,6 +34,31 @@ type Broker interface {
 	Subscribe(topic string, h Handler, opts ...SubscribeOption) (Subscriber, error)
 	// String returns the broker implementation name.
 	String() string
+}
+
+// Observable is an optional capability implemented by brokers that expose
+// health and diagnostic information. Broker intentionally does not embed it,
+// preserving compatibility with third-party implementations.
+type Observable interface {
+	Observability() Observability
+}
+
+// Observability is the concurrency-safe operational view of one broker.
+type Observability interface {
+	HealthChecker
+	DiagnosticsProvider
+	SetCategories(CategorySet) error
+}
+
+// HealthChecker exposes passive local health and an explicit active probe.
+type HealthChecker interface {
+	Health() HealthStatus
+	Probe(context.Context) (HealthStatus, error)
+}
+
+// DiagnosticsProvider returns an immutable point-in-time diagnostic snapshot.
+type DiagnosticsProvider interface {
+	Snapshot() DiagnosticSnapshot
 }
 
 // Handler is used to process messages via a subscription of a topic.

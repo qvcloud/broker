@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24"
           cache: true
@@ -41,8 +41,17 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Build observability example
+        run: go build ./examples/observability
+
+      - name: Smoke test observability switches
+        run: |
+          go run ./examples/observability
+          go run ./examples/observability -observe -health -diagnostics
+          go run ./examples/observability -observe -metrics -correlation -events
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -52,10 +61,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24"
           cache: true
@@ -69,6 +78,11 @@ jobs:
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $3); print $3}')
           awk -v total="$total" 'BEGIN { if (total < 75) { printf "coverage %.1f%% is below 75%%\n", total; exit 1 } }'
           printf 'total coverage: %s%%\n' "$total"
+
+      - name: Enforce observability performance budget
+        env:
+          BROKER_ENFORCE_PERFORMANCE: "1"
+        run: go test -count=1 -run '^TestObservabilityStandardOverheadBudget$' .
 
       - name: Run race detector
         run: go test -race -count=1 ./...

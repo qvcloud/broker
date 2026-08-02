@@ -24,6 +24,19 @@ QvCloud Broker is a production-oriented messaging abstraction for Go. It provide
     | **GCP Pub/Sub** | 🧪 Improving | **62.0%** | Google Cloud Pub/Sub |
 - **Extensibility**: Plugin-based architecture for easy integration of new MQ implementations.
 - **Universal Model**: A vendor-agnostic message structure.
+- **Opt-in Observability**: Logging, health, snapshots, measurements, correlation, and state events are off by default and independently selectable without changing `Broker`.
+
+### Observability and troubleshooting example
+
+```bash
+go run ./examples/observability
+go run ./examples/observability -observe -health -diagnostics
+go run ./examples/observability -observe -all -scenario=handler-failure
+```
+
+Passive health performs no network call; active probing is explicit through `-probe`. Diagnostic output excludes message bodies, connection credentials, and raw correlation values. See [`examples/observability`](examples/observability/README.md) for every switch and failure scenario.
+
+Disabled mode starts no background worker and targets less than 1% hot-path overhead; the standard logging, diagnostics, measurements, and correlation package targets less than 5%, verified with same-machine benchmarks. Unsupported adapter probes return `broker.ErrUnsupported` explicitly rather than reporting fabricated health.
 
 ## Project Structure
 

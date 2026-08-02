@@ -23,7 +23,7 @@ func main() {
 	if err := b.Connect(); err != nil {
 		log.Fatalf("Broker Connect error: %v", err)
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 
 	topic := "your-topic-id"
 	subscription := "your-subscription-id"

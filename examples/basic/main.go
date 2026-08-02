@@ -17,7 +17,7 @@ func main() {
 	if err := b.Connect(); err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 
 	// Subscribe to a topic
 	topic := "example.topic"

@@ -175,3 +175,25 @@
 | `redis.WithMaxLen(int64)` | 设置 Stream 的最大长度 (`MAXLEN`) |
 
 **注**：Redis 适配器基于 **Redis Streams** 实现。订阅时必须通过 `broker.Queue(groupName)` 指定 Consumer Group 名称以保证消息可靠消费（PEL 支持）。
+
+---
+
+## 10. 可观测能力矩阵
+
+所有内置适配器都通过可选 `broker.Observable` 接口提供本地生命周期状态、不可变诊断快照、发布/Handler/Ack/Nack 结果、固定维度指标和 W3C 上下文传递。该能力不会加入 `broker.Broker`，第三方实现无需修改。
+
+| 适配器 | 被动健康 | 主动探测 | 诊断/指标 | 上下文传递 | 验证方式 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Kafka | 支持 | 可取消 TCP dial | 支持 | Header | Docker 集成 |
+| RabbitMQ | 支持 | 连接状态检查 | 支持 | AMQP Header | Docker 集成 |
+| NATS | 支持 | `FlushWithContext` | 支持 | Header | Docker 集成 |
+| Redis Streams | 支持 | `PING` | 支持 | Stream 字段 | Docker 集成 |
+| RocketMQ | 支持 | 暂不支持 | 支持 | Message Property | Mock；发布前需真实服务复验 |
+| AWS SQS | 支持 | 暂不支持 | 支持 | Message Attribute | Mock；发布前需真实 AWS 队列复验 |
+| GCP Pub/Sub | 支持 | 暂不支持 | 支持 | Message Attribute | Mock；发布前需真实 GCP 项目复验 |
+
+被动 `Health()` 只读取本地同步状态，不发起网络请求。`Probe(ctx)` 仅在表中明确支持时执行，并遵守调用方取消和超时；其他适配器返回可用 `errors.Is` 判断的 `broker.ErrUnsupported`。所有能力默认关闭，启用方式和故障场景见 `examples/observability/`。
+
+### 云适配器发布前验证
+
+`go test -count=1 ./integration -run CloudAdapterObservabilityContracts` 会在无云凭证时验证 RocketMQ、SQS 与 Pub/Sub 的被动能力、固定信号集合、上下文复制和“不支持主动探测”契约。发布版本还应分别在隔离的真实 RocketMQ NameServer、AWS 测试队列和 GCP 测试项目中运行各适配器包测试，并人工确认：连接状态可恢复、消息正文和凭证未出现在输出中、Trace Context 能随消息往返、关闭后无后台消费者残留。真实服务凭证仅通过环境或工作负载身份注入，不写入命令、日志或仓库。

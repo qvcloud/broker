@@ -108,3 +108,24 @@ func TestNoopSubscriber_Methods(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, <-s.exit)
 }
+
+func TestNoopObservabilityDoesNotChangeDelivery(t *testing.T) {
+	for _, opts := range [][]Option{nil, {WithObservability(EnableCategories(CategoryDiagnostics))}} {
+		candidate := NewNoopBroker(opts...)
+		observable, ok := candidate.(Observable)
+		assert.True(t, ok)
+		assert.NoError(t, candidate.Connect())
+		received := make(chan struct{}, 1)
+		subscriber, err := candidate.Subscribe("observed", func(context.Context, Event) error { received <- struct{}{}; return nil })
+		assert.NoError(t, err)
+		assert.NoError(t, candidate.Publish(context.Background(), "observed", &Message{Body: []byte("not logged")}))
+		select {
+		case <-received:
+		case <-time.After(time.Second):
+			t.Fatal("delivery changed")
+		}
+		assert.NoError(t, subscriber.Unsubscribe())
+		assert.NoError(t, candidate.Disconnect())
+		assert.NotNil(t, observable.Observability().Snapshot().OperationTotals)
+	}
+}

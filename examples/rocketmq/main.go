@@ -23,7 +23,7 @@ func main() {
 	if err := b.Connect(); err != nil {
 		log.Fatalf("Connect error: %v", err)
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 
 	_, err := b.Subscribe("test_topic", func(ctx context.Context, event broker.Event) error {
 		fmt.Printf("Received message: %s\n", string(event.Message().Body))

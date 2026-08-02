@@ -16,6 +16,7 @@ import (
 )
 
 type rmqBroker struct {
+	*broker.Runtime
 	opts broker.Options
 
 	producer rocketmq.Producer
@@ -47,7 +48,17 @@ func (r *rmqBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (r *rmqBroker) Connect() error {
+func (r *rmqBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			r.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := r.ValidationError(); err != nil {
+		return err
+	}
+	r.Start()
+	r.Transition(broker.StateConnecting, false, false, nil)
 	r.Lock()
 	defer r.Unlock()
 
@@ -111,6 +122,7 @@ func (r *rmqBroker) Connect() error {
 
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
+	r.Transition(broker.StateReady, true, true, nil)
 
 	broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
 	return nil
@@ -139,10 +151,16 @@ func (r *rmqBroker) Disconnect() error {
 	}
 
 	r.running = false
+	r.Transition(broker.StateStopped, false, false, nil)
+	r.Close()
 	return nil
 }
 
-func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if r.Runtime != nil && r.OperationsEnabled() {
+		started := r.StartOperation(broker.OperationPublish)
+		defer func() { r.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -151,7 +169,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 	}
 
 	rmqMsg := primitive.NewMessage(topic, msg.Body)
-	for k, v := range msg.Header {
+	for k, v := range r.InjectContext(ctx, msg.Header) {
 		switch k {
 		case "KEYS":
 			rmqMsg.WithKeys([]string{v})
@@ -263,6 +281,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 }
 
 func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = r.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	r.Lock()
@@ -351,6 +370,7 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 			}
 
 			if err := handler(ctx, event); err != nil {
+				r.Observe(broker.OperationRetry, time.Now(), err)
 				return consumer.ConsumeRetryLater, err
 			}
 
@@ -366,12 +386,12 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		return nil, err
 	}
 
-	return &rmqSubscriber{
+	return r.WrapSubscriber(&rmqSubscriber{
 		topic:  topic,
 		opts:   options,
 		broker: r,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (r *rmqBroker) String() string {
@@ -448,6 +468,7 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 
 	return &rmqBroker{
+		Runtime:     broker.NewRuntimeForOptions("rocketmq", *options),
 		opts:        *options,
 		newProducer: rocketmq.NewProducer,
 		newConsumer: rocketmq.NewPushConsumer,
