@@ -14,7 +14,7 @@ dispatcher; OpenTelemetry remains an opt-in integration through the existing tra
 
 ## Technical Context
 
-**Language/Version**: Go 1.24.0
+**Language/Version**: Go 1.26.5 (minimum patched toolchain and dependency requirement)
 **Primary Dependencies**: Go standard library; existing OpenTelemetry trace/metric APIs; existing
 adapter SDKs (no new production dependency planned)
 **Storage**: In-memory bounded counters, state, and recent safe failure only; no persistence

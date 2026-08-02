@@ -6,7 +6,7 @@ signals in [signal-catalog.md](contracts/signal-catalog.md).
 
 ## Prerequisites
 
-- Go 1.24 or later in the Go 1.24 release line
+- Go 1.26.5 or later patched release
 - Docker with Compose support for integration scenarios
 - Repository checked out on `006-observability-diagnostics`
 
