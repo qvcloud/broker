@@ -195,6 +195,12 @@ default:
 
 完整示例开关和场景说明见 [`examples/observability`](examples/observability/README.md)，各适配器差异见 [`ADAPTER_EXTENSIONS.md`](ADAPTER_EXTENSIONS.md)。禁用模式不启动事件 worker，实测目标热路径开销低于 1%；标准启用组合的代表性吞吐开销门禁为低于 5%。
 
+性能门禁必须脱离覆盖率和 Race 插桩独立执行，否则插桩会不成比例地放大启用路径：
+
+```bash
+BROKER_ENFORCE_PERFORMANCE=1 go test -count=1 -run '^TestObservabilityStandardOverheadBudget$' .
+```
+
 ## 项目结构
 
 ```

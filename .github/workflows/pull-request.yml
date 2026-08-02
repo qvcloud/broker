@@ -79,5 +79,10 @@ jobs:
           awk -v total="$total" 'BEGIN { if (total < 75) { printf "coverage %.1f%% is below 75%%\n", total; exit 1 } }'
           printf 'total coverage: %s%%\n' "$total"
 
+      - name: Enforce observability performance budget
+        env:
+          BROKER_ENFORCE_PERFORMANCE: "1"
+        run: go test -count=1 -run '^TestObservabilityStandardOverheadBudget$' .
+
       - name: Run race detector
         run: go test -race -count=1 ./...
