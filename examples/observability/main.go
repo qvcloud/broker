@@ -33,8 +33,8 @@ func (w *lockedWriter) Write(p []byte) (int, error) {
 }
 
 func (s printSink) HandleObservabilityEvent(_ context.Context, event broker.BrokerStateEvent) error {
-	fmt.Fprintf(s.writer, "event kind=%s operation=%s outcome=%s state=%s\n", event.Kind, event.Operation, event.Outcome, event.To)
-	return nil
+	_, err := fmt.Fprintf(s.writer, "event kind=%s operation=%s outcome=%s state=%s\n", event.Kind, event.Operation, event.Outcome, event.To)
+	return err
 }
 
 type scenarioBroker struct {
@@ -145,7 +145,7 @@ func runTo(args []string, output io.Writer) error {
 	b := broker.Broker(&scenarioBroker{Broker: base, runtime: runtime, scenario: cfg.scenario})
 	observable := b.(broker.Observable).Observability()
 	if cfg.all || cfg.health {
-		fmt.Fprintf(output, "health state=%s ready=%t\n", observable.Health().State, observable.Health().Ready)
+		_, _ = fmt.Fprintf(output, "health state=%s ready=%t\n", observable.Health().State, observable.Health().Ready)
 	}
 	if err := b.Connect(); err != nil {
 		if cfg.all || cfg.diagnostics {
@@ -153,12 +153,12 @@ func runTo(args []string, output io.Writer) error {
 		}
 		return err
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.timeout)
 	defer cancel()
 	if cfg.probe {
 		status, err := observable.Probe(ctx)
-		fmt.Fprintf(output, "health probe state=%s ready=%t unsupported=%t\n", status.State, status.Ready, errors.Is(err, broker.ErrUnsupported))
+		_, _ = fmt.Fprintf(output, "health probe state=%s ready=%t unsupported=%t\n", status.State, status.Ready, errors.Is(err, broker.ErrUnsupported))
 	}
 	handler := func(context.Context, broker.Event) error {
 		if cfg.scenario == "handler-failure" {
@@ -179,15 +179,15 @@ func runTo(args []string, output io.Writer) error {
 	}
 	if cfg.all || cfg.metrics {
 		total := observable.Snapshot().OperationTotals["publish:success"]
-		fmt.Fprintf(output, "metric name=broker.operations operation=publish outcome=success value=%d\n", total)
+		_, _ = fmt.Fprintf(output, "metric name=broker.operations operation=publish outcome=success value=%d\n", total)
 	}
 	if cfg.all || cfg.correlation {
-		fmt.Fprintln(output, "scenario correlation=enabled propagated=true")
+		_, _ = fmt.Fprintln(output, "scenario correlation=enabled propagated=true")
 	}
 	if cfg.all || cfg.diagnostics {
 		printSnapshot(output, observable.Snapshot())
 	}
-	fmt.Fprintf(output, "scenario name=%s status=complete\n", cfg.scenario)
+	_, _ = fmt.Fprintf(output, "scenario name=%s status=complete\n", cfg.scenario)
 	return nil
 }
 
@@ -196,7 +196,7 @@ func printSnapshot(output io.Writer, snap broker.DiagnosticSnapshot) {
 	if snap.LastFailure != nil {
 		category = snap.LastFailure.Category
 	}
-	fmt.Fprintf(output, "snapshot broker=%s state=%s subscriptions=%d dropped=%d error_category=%s\n", snap.BrokerSystem, snap.Health.State, snap.SubscriptionCount, snap.DroppedRecords, category)
+	_, _ = fmt.Fprintf(output, "snapshot broker=%s state=%s subscriptions=%d dropped=%d error_category=%s\n", snap.BrokerSystem, snap.Health.State, snap.SubscriptionCount, snap.DroppedRecords, category)
 }
 
 func main() {

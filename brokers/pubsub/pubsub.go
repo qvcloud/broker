@@ -134,7 +134,7 @@ func (p *pubsubBroker) Disconnect() error {
 	p.provider = nil
 	p.running = false
 	p.Transition(broker.StateStopped, false, false, nil)
-	p.Runtime.Close()
+	p.Close()
 	return closeErr
 }
 

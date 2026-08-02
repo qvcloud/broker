@@ -51,7 +51,7 @@ func runRepresentativePublish(iterations int, enabled bool, payload []byte) time
 	}
 	candidate := NewNoopBroker(options...)
 	_ = candidate.Connect()
-	defer candidate.Disconnect()
+	defer func() { _ = candidate.Disconnect() }()
 	message := &Message{Body: payload}
 	started := time.Now()
 	for index := 0; index < iterations; index++ {

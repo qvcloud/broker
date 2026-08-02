@@ -248,7 +248,7 @@ func (r *Runtime) Observe(operation Operation, started time.Time, err error) {
 	if r == nil {
 		return
 	}
-	if !r.enabled(CategoryDiagnostics) && !r.enabled(CategoryMeasurements) && !(err != nil && r.enabled(CategoryLogging)) {
+	if !r.enabled(CategoryDiagnostics) && !r.enabled(CategoryMeasurements) && (err == nil || !r.enabled(CategoryLogging)) {
 		return
 	}
 	outcome := OutcomeSuccess

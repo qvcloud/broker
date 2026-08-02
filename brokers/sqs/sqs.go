@@ -100,7 +100,7 @@ func (s *sqsBroker) Disconnect() error {
 	s.client = nil
 	s.running = false
 	s.Transition(broker.StateStopped, false, false, nil)
-	s.Runtime.Close()
+	s.Close()
 	return nil
 }
 

@@ -151,7 +151,7 @@ func (n *natsBroker) Disconnect() error {
 
 	n.running = false
 	n.Transition(broker.StateStopped, false, false, nil)
-	n.Runtime.Close()
+	n.Close()
 	return nil
 }
 

@@ -20,7 +20,7 @@ func main() {
 	if err := b.Connect(); err != nil {
 		log.Fatalf("Cant connect to redis: %v", err)
 	}
-	defer b.Disconnect()
+	defer func() { _ = b.Disconnect() }()
 
 	topic := "test_topic"
 

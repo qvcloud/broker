@@ -18,7 +18,7 @@ func BenchmarkNoopBrokerPublish(b *testing.B) {
 }
 
 func BenchmarkDirectInterface(b *testing.B) {
-	var broker Broker = NewNoopBroker()
+	broker := NewNoopBroker()
 	topic := "bench"
 	msg := &Message{Body: []byte("test")}
 	ctx := context.Background()

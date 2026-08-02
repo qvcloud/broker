@@ -135,7 +135,7 @@ func (r *redisBroker) Disconnect() error {
 
 	r.running = false
 	r.Transition(broker.StateStopped, false, false, nil)
-	r.Runtime.Close()
+	r.Close()
 	return nil
 }
 

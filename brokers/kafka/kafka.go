@@ -161,7 +161,7 @@ func (k *kafkaBroker) Disconnect() error {
 
 	k.running = false
 	k.Transition(broker.StateStopped, false, false, nil)
-	k.Runtime.Close()
+	k.Close()
 	return nil
 }
 
