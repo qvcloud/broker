@@ -45,6 +45,7 @@ func (r *realPubSubProvider) Close() error {
 }
 
 type pubsubBroker struct {
+	*broker.Runtime
 	opts        broker.Options
 	provider    pubsubProvider
 	newProvider func(context.Context, string) (pubsubProvider, error)
@@ -71,7 +72,17 @@ func (p *pubsubBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (p *pubsubBroker) Connect() error {
+func (p *pubsubBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			p.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := p.ValidationError(); err != nil {
+		return err
+	}
+	p.Start()
+	p.Transition(broker.StateConnecting, false, false, nil)
 	p.Lock()
 	defer p.Unlock()
 
@@ -96,6 +107,7 @@ func (p *pubsubBroker) Connect() error {
 	p.provider = client
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 	p.running = true
+	p.Transition(broker.StateReady, true, true, nil)
 
 	// Warn about unconsumed options
 	broker.WarnUnconsumed(p.opts.Context, p.opts.Logger)
@@ -121,10 +133,16 @@ func (p *pubsubBroker) Disconnect() error {
 	}
 	p.provider = nil
 	p.running = false
+	p.Transition(broker.StateStopped, false, false, nil)
+	p.Runtime.Close()
 	return closeErr
 }
 
-func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if p.Runtime != nil && p.OperationsEnabled() {
+		started := p.StartOperation(broker.OperationPublish)
+		defer func() { p.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -141,7 +159,7 @@ func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Me
 	}
 
 	attributes := make(map[string]string)
-	for k, v := range msg.Header {
+	for k, v := range p.InjectContext(ctx, msg.Header) {
 		attributes[k] = v
 	}
 
@@ -150,7 +168,7 @@ func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Me
 		Attributes: attributes,
 	})
 
-	_, err := res.Get(ctx)
+	_, err = res.Get(ctx)
 	if err == nil {
 		broker.WarnUnconsumed(options.Context, p.opts.Logger)
 	}
@@ -158,6 +176,7 @@ func (p *pubsubBroker) Publish(ctx context.Context, topic string, msg *broker.Me
 }
 
 func (p *pubsubBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = p.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	p.RLock()
@@ -201,16 +220,19 @@ func (p *pubsubBroker) Subscribe(topic string, handler broker.Handler, opts ...b
 				event.Ack()
 			}
 		})
-		if err != nil && p.opts.Logger != nil {
-			p.opts.Logger.Logf("Pub/Sub receive error: %v", err)
+		if err != nil {
+			p.Observe(broker.OperationReceive, time.Now(), err)
+			if p.opts.Logger != nil {
+				p.opts.Logger.Logf("Pub/Sub receive error: %v", err)
+			}
 		}
 	}()
 
-	return &pubsubSubscriber{
+	return p.WrapSubscriber(&pubsubSubscriber{
 		topic:  topic,
 		opts:   options,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (p *pubsubBroker) String() string {
@@ -255,7 +277,8 @@ func (e *pubsubEvent) Error() error { return nil }
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &pubsubBroker{
-		opts: *options,
+		Runtime: broker.NewRuntimeForOptions("pubsub", *options),
+		opts:    *options,
 		newProvider: func(ctx context.Context, projectID string) (pubsubProvider, error) {
 			client, err := pubsub.NewClient(ctx, projectID)
 			if err != nil {

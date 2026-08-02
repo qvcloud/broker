@@ -21,6 +21,7 @@ type redisClient interface {
 }
 
 type redisBroker struct {
+	*broker.Runtime
 	opts   broker.Options
 	client redisClient
 
@@ -48,7 +49,17 @@ func (r *redisBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (r *redisBroker) Connect() error {
+func (r *redisBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			r.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := r.ValidationError(); err != nil {
+		return err
+	}
+	r.Start()
+	r.Transition(broker.StateConnecting, false, false, nil)
 	r.Lock()
 	defer r.Unlock()
 
@@ -79,16 +90,28 @@ func (r *redisBroker) Connect() error {
 	}
 
 	r.client = r.newClient(redisOpts)
+	r.SetProbe(func(ctx context.Context) error {
+		r.RLock()
+		client := r.client
+		running := r.running
+		r.RUnlock()
+		if !running || client == nil {
+			return broker.ErrUnsupported
+		}
+		return client.Ping(ctx).Err()
+	})
 
 	// Check connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.client.Ping(ctx).Err(); err != nil {
+		r.Transition(broker.StateDegraded, false, false, err)
 		return fmt.Errorf("redis: connect error: %v", err)
 	}
 
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
+	r.Transition(broker.StateReady, true, true, nil)
 
 	broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
 	return nil
@@ -111,10 +134,16 @@ func (r *redisBroker) Disconnect() error {
 	}
 
 	r.running = false
+	r.Transition(broker.StateStopped, false, false, nil)
+	r.Runtime.Close()
 	return nil
 }
 
-func (r *redisBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (r *redisBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if r.Runtime != nil && r.OperationsEnabled() {
+		started := r.StartOperation(broker.OperationPublish)
+		defer func() { r.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{Context: ctx}
 	for _, o := range opts {
 		o(&options)
@@ -130,7 +159,7 @@ func (r *redisBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 
 	values := make(map[string]interface{})
 	values["body"] = msg.Body
-	for k, v := range msg.Header {
+	for k, v := range r.InjectContext(ctx, msg.Header) {
 		values["h:"+k] = v
 	}
 
@@ -148,7 +177,7 @@ func (r *redisBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 		Approx: true,
 	}
 
-	err := client.XAdd(ctx, arg).Err()
+	err = client.XAdd(ctx, arg).Err()
 	if err == nil {
 		broker.WarnUnconsumed(options.Context, r.opts.Logger)
 	}
@@ -156,6 +185,7 @@ func (r *redisBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 }
 
 func (r *redisBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = r.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	group := options.Queue
@@ -205,10 +235,10 @@ func (r *redisBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		}
 	}()
 
-	return &redisSubscriber{
+	return r.WrapSubscriber(&redisSubscriber{
 		topic:  topic,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (r *redisBroker) processStream(ctx context.Context, client redisClient, topic, group, consumer, id string, handler broker.Handler, subOpts broker.SubscribeOptions) bool {
@@ -221,6 +251,10 @@ func (r *redisBroker) processStream(ctx context.Context, client redisClient, top
 	}).Result()
 
 	if err != nil {
+		r.Observe(broker.OperationReceive, time.Now(), err)
+		if ctx.Err() == nil {
+			r.Observe(broker.OperationRetry, time.Now(), err)
+		}
 		if err != redis.Nil && ctx.Err() == nil {
 			if r.opts.Logger != nil {
 				r.opts.Logger.Logf("redis: read error: %v", err)
@@ -327,8 +361,10 @@ func WithMaxLen(l int64) broker.PublishOption {
 }
 
 func NewBroker(opts ...broker.Option) broker.Broker {
+	options := broker.NewOptions(opts...)
 	return &redisBroker{
-		opts: *broker.NewOptions(opts...),
+		Runtime: broker.NewRuntimeForOptions("redis", *options),
+		opts:    *options,
 		newClient: func(opts *redis.Options) redisClient {
 			return redis.NewClient(opts)
 		},

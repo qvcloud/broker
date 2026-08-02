@@ -23,6 +23,7 @@ type sqsAPI interface {
 }
 
 type sqsBroker struct {
+	*broker.Runtime
 	opts   broker.Options
 	client sqsAPI
 
@@ -50,7 +51,17 @@ func (s *sqsBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (s *sqsBroker) Connect() error {
+func (s *sqsBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			s.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := s.ValidationError(); err != nil {
+		return err
+	}
+	s.Start()
+	s.Transition(broker.StateConnecting, false, false, nil)
 	s.Lock()
 	defer s.Unlock()
 
@@ -66,6 +77,7 @@ func (s *sqsBroker) Connect() error {
 	s.client = cli
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.running = true
+	s.Transition(broker.StateReady, true, true, nil)
 
 	// Warn about unconsumed options
 	broker.WarnUnconsumed(s.opts.Context, s.opts.Logger)
@@ -87,10 +99,16 @@ func (s *sqsBroker) Disconnect() error {
 
 	s.client = nil
 	s.running = false
+	s.Transition(broker.StateStopped, false, false, nil)
+	s.Runtime.Close()
 	return nil
 }
 
-func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if s.Runtime != nil && s.OperationsEnabled() {
+		started := s.StartOperation(broker.OperationPublish)
+		defer func() { s.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -137,14 +155,14 @@ func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		}
 	}
 
-	for k, v := range msg.Header {
+	for k, v := range s.InjectContext(ctx, msg.Header) {
 		input.MessageAttributes[k] = types.MessageAttributeValue{
 			DataType:    aws.String("String"),
 			StringValue: aws.String(v),
 		}
 	}
 
-	_, err := client.SendMessage(ctx, input)
+	_, err = client.SendMessage(ctx, input)
 	if err == nil {
 		broker.WarnUnconsumed(options.Context, s.opts.Logger)
 	}
@@ -152,6 +170,7 @@ func (s *sqsBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 }
 
 func (s *sqsBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = s.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	s.RLock()
@@ -188,7 +207,7 @@ func (s *sqsBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 
 	go s.run(ctx, queueUrl, handler, options)
 
-	return sub, nil
+	return s.WrapSubscriber(sub), nil
 }
 
 func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Handler, options broker.SubscribeOptions) {
@@ -235,6 +254,10 @@ func (s *sqsBroker) run(ctx context.Context, queueUrl string, handler broker.Han
 
 			output, err := client.ReceiveMessage(ctx, input)
 			if err != nil {
+				s.Observe(broker.OperationReceive, time.Now(), err)
+				if ctx.Err() == nil {
+					s.Observe(broker.OperationRetry, time.Now(), err)
+				}
 				if ctx.Err() == nil && s.opts.Logger != nil {
 					s.opts.Logger.Logf("SQS receive error: %v", err)
 				}
@@ -322,7 +345,8 @@ func (e *sqsEvent) Error() error { return nil }
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &sqsBroker{
-		opts: *options,
+		Runtime: broker.NewRuntimeForOptions("sqs", *options),
+		opts:    *options,
 		newClient: func(ctx context.Context) (sqsAPI, error) {
 			cfg, err := config.LoadDefaultConfig(ctx)
 			if err != nil {

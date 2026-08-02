@@ -22,6 +22,7 @@ type kafkaReader interface {
 }
 
 type kafkaBroker struct {
+	*broker.Runtime
 	opts broker.Options
 
 	writer kafkaWriter
@@ -53,7 +54,17 @@ func (k *kafkaBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (k *kafkaBroker) Connect() error {
+func (k *kafkaBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			k.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := k.ValidationError(); err != nil {
+		return err
+	}
+	k.Start()
+	k.Transition(broker.StateConnecting, false, false, nil)
 	k.Lock()
 	defer k.Unlock()
 
@@ -110,9 +121,17 @@ func (k *kafkaBroker) Connect() error {
 		BatchSize:              batchSize,
 		AllowAutoTopicCreation: autoCreateTopic,
 	})
+	k.SetProbe(func(ctx context.Context) error {
+		conn, err := dialer.DialContext(ctx, "tcp", k.opts.Addrs[0])
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	})
 
 	k.ctx, k.cancel = context.WithCancel(context.Background())
 	k.running = true
+	k.Transition(broker.StateReady, true, true, nil)
 
 	broker.WarnUnconsumed(k.opts.Context, k.opts.Logger)
 	return nil
@@ -141,10 +160,16 @@ func (k *kafkaBroker) Disconnect() error {
 	k.readers = make(map[string]kafkaReader)
 
 	k.running = false
+	k.Transition(broker.StateStopped, false, false, nil)
+	k.Runtime.Close()
 	return nil
 }
 
-func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if k.Runtime != nil && k.OperationsEnabled() {
+		started := k.StartOperation(broker.OperationPublish)
+		defer func() { k.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -153,7 +178,7 @@ func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 	}
 
 	headers := []kafka.Header{}
-	for key, val := range msg.Header {
+	for key, val := range k.InjectContext(ctx, msg.Header) {
 		headers = append(headers, kafka.Header{
 			Key:   key,
 			Value: []byte(val),
@@ -167,7 +192,7 @@ func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 		}
 	}
 
-	err := k.writer.WriteMessages(ctx, kafka.Message{
+	err = k.writer.WriteMessages(ctx, kafka.Message{
 		Topic:     topic,
 		Partition: partition,
 		Key:       []byte(options.ShardingKey),
@@ -180,6 +205,7 @@ func (k *kafkaBroker) Publish(ctx context.Context, topic string, msg *broker.Mes
 }
 
 func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = k.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	if len(k.opts.Addrs) == 0 {
@@ -246,6 +272,7 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 					if ctx.Err() != nil {
 						return
 					}
+					k.Observe(broker.OperationReceive, time.Now(), err)
 					if k.opts.Logger != nil {
 						k.opts.Logger.Logf("Kafka fetch error: %v", err)
 					}
@@ -278,12 +305,12 @@ func (k *kafkaBroker) Subscribe(topic string, handler broker.Handler, opts ...br
 		}
 	}()
 
-	return &kafkaSubscriber{
+	return k.WrapSubscriber(&kafkaSubscriber{
 		topic:  topic,
 		opts:   options,
 		reader: reader,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (k *kafkaBroker) String() string {
@@ -347,6 +374,7 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 
 	return &kafkaBroker{
+		Runtime: broker.NewRuntimeForOptions("kafka", *options),
 		opts:    *options,
 		readers: make(map[string]kafkaReader),
 		newWriter: func(w *kafka.Writer) kafkaWriter {

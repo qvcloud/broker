@@ -1,0 +1,16 @@
+.git/
+.github/
+.dockerignore
+Dockerfile*
+vendor/
+bin/
+coverage/
+*.out
+*.test
+*.prof
+*.log*
+.env*
+.DS_Store
+.idea/
+.vscode/
+specs/

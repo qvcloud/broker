@@ -33,6 +33,7 @@ func (w *connWrapper) Channel() (rabbitChannel, error) {
 }
 
 type rmqBroker struct {
+	*broker.Runtime
 	opts broker.Options
 
 	conn    rabbitConn
@@ -65,7 +66,17 @@ func (r *rmqBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (r *rmqBroker) Connect() error {
+func (r *rmqBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			r.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := r.ValidationError(); err != nil {
+		return err
+	}
+	r.Start()
+	r.Transition(broker.StateConnecting, false, false, nil)
 	r.Lock()
 	defer r.Unlock()
 
@@ -92,6 +103,21 @@ func (r *rmqBroker) Connect() error {
 		return err
 	}
 	r.conn = conn
+	r.SetProbe(func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		r.RLock()
+		connection := r.conn
+		running := r.running
+		r.RUnlock()
+		if !running || connection == nil || connection.IsClosed() {
+			return fmt.Errorf("rabbitmq: connection is not ready")
+		}
+		return nil
+	})
 
 	ch, err := conn.Channel()
 	if err != nil {
@@ -102,6 +128,7 @@ func (r *rmqBroker) Connect() error {
 
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.running = true
+	r.Transition(broker.StateReady, true, true, nil)
 
 	// Warn about unconsumed options at connection time
 	broker.WarnUnconsumed(r.opts.Context, r.opts.Logger)
@@ -119,6 +146,8 @@ func (r *rmqBroker) Connect() error {
 			r.RUnlock()
 
 			if conn == nil || conn.IsClosed() {
+				r.Transition(broker.StateReconnecting, false, false, nil)
+				started := r.StartOperation(broker.OperationReconnect)
 				if r.opts.Logger != nil {
 					r.opts.Logger.Log("RabbitMQ connection lost, reconnecting...")
 				}
@@ -130,7 +159,10 @@ func (r *rmqBroker) Connect() error {
 						r.channel = ch
 					}
 					r.Unlock()
+					r.Observe(broker.OperationReconnect, started, nil)
+					r.Transition(broker.StateReady, true, true, nil)
 				} else {
+					r.Observe(broker.OperationReconnect, started, err)
 					if r.opts.Logger != nil {
 						r.opts.Logger.Logf("RabbitMQ reconnection failed: %v", err)
 					}
@@ -168,10 +200,16 @@ func (r *rmqBroker) Disconnect() error {
 	}
 
 	r.running = false
+	r.Transition(broker.StateStopped, false, false, nil)
+	r.Runtime.Close()
 	return nil
 }
 
-func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if r.Runtime != nil && r.OperationsEnabled() {
+		started := r.StartOperation(broker.OperationPublish)
+		defer func() { r.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -187,7 +225,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		return fmt.Errorf("not connected")
 	}
 
-	headers := stringMapToTable(msg.Header)
+	headers := stringMapToTable(r.InjectContext(ctx, msg.Header))
 	if options.Delay > 0 {
 		headers["x-delay"] = int64(options.Delay.Milliseconds())
 	}
@@ -215,7 +253,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 		}
 	}
 
-	err := ch.PublishWithContext(ctx,
+	err = ch.PublishWithContext(ctx,
 		exchange,  // exchange
 		topic,     // routing key
 		mandatory, // mandatory
@@ -236,6 +274,7 @@ func (r *rmqBroker) Publish(ctx context.Context, topic string, msg *broker.Messa
 }
 
 func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = r.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	r.RLock()
@@ -250,11 +289,11 @@ func (r *rmqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 
 	go r.runSubscriber(ctx, topic, handler, options)
 
-	return &rmqSubscriber{
+	return r.WrapSubscriber(&rmqSubscriber{
 		topic:  topic,
 		opts:   options,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (r *rmqBroker) runSubscriber(ctx context.Context, topic string, handler broker.Handler, options broker.SubscribeOptions) {
@@ -428,7 +467,8 @@ func (e *rmqEvent) Error() error             { return nil }
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &rmqBroker{
-		opts: *options,
+		Runtime: broker.NewRuntimeForOptions("rabbitmq", *options),
+		opts:    *options,
 		newConn: func(addr string, config amqp.Config) (rabbitConn, error) {
 			conn, err := amqp.DialConfig(addr, config)
 			if err != nil {

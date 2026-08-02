@@ -18,6 +18,7 @@ type natsConn interface {
 }
 
 type natsBroker struct {
+	*broker.Runtime
 	opts broker.Options
 	conn natsConn
 
@@ -45,7 +46,17 @@ func (n *natsBroker) Init(opts ...broker.Option) error {
 	return nil
 }
 
-func (n *natsBroker) Connect() error {
+func (n *natsBroker) Connect() (err error) {
+	defer func() {
+		if err != nil {
+			n.Transition(broker.StateDegraded, false, false, err)
+		}
+	}()
+	if err := n.ValidationError(); err != nil {
+		return err
+	}
+	n.Start()
+	n.Transition(broker.StateConnecting, false, false, nil)
 	n.Lock()
 	defer n.Unlock()
 
@@ -58,12 +69,21 @@ func (n *natsBroker) Connect() error {
 	}
 
 	addr := n.Address()
-	var (
-		conn natsConn
-		err  error
-	)
+	var conn natsConn
 
 	opts := []nats.Option{}
+	opts = append(opts,
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			n.Transition(broker.StateReconnecting, false, false, err)
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			n.Observe(broker.OperationReconnect, time.Now(), nil)
+			n.Transition(broker.StateReady, true, true, nil)
+		}),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+			n.Observe(broker.OperationReceive, time.Now(), err)
+		}),
+	)
 	if n.opts.TLSConfig != nil {
 		opts = append(opts, nats.Secure(n.opts.TLSConfig))
 	}
@@ -88,9 +108,24 @@ func (n *natsBroker) Connect() error {
 		return err
 	}
 	n.conn = conn
+	n.SetProbe(func(ctx context.Context) error {
+		n.RLock()
+		current := n.conn
+		running := n.running
+		n.RUnlock()
+		if !running || current == nil {
+			return broker.ErrUnsupported
+		}
+		flusher, ok := current.(interface{ FlushWithContext(context.Context) error })
+		if !ok {
+			return broker.ErrUnsupported
+		}
+		return flusher.FlushWithContext(ctx)
+	})
 
 	n.ctx, n.cancel = context.WithCancel(context.Background())
 	n.running = true
+	n.Transition(broker.StateReady, true, true, nil)
 
 	// Warn about unconsumed options
 	broker.WarnUnconsumed(n.opts.Context, n.opts.Logger)
@@ -115,10 +150,16 @@ func (n *natsBroker) Disconnect() error {
 	}
 
 	n.running = false
+	n.Transition(broker.StateStopped, false, false, nil)
+	n.Runtime.Close()
 	return nil
 }
 
-func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) error {
+func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Message, opts ...broker.PublishOption) (err error) {
+	if n.Runtime != nil && n.OperationsEnabled() {
+		started := n.StartOperation(broker.OperationPublish)
+		defer func() { n.Observe(broker.OperationPublish, started, err) }()
+	}
 	options := broker.PublishOptions{
 		Context: ctx,
 	}
@@ -146,11 +187,11 @@ func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Mess
 		}
 	}
 
-	for k, v := range msg.Header {
+	for k, v := range n.InjectContext(ctx, msg.Header) {
 		nm.Header.Set(k, v)
 	}
 
-	err := conn.PublishMsg(nm)
+	err = conn.PublishMsg(nm)
 	if err == nil {
 		broker.WarnUnconsumed(options.Context, n.opts.Logger)
 	}
@@ -158,6 +199,7 @@ func (n *natsBroker) Publish(ctx context.Context, topic string, msg *broker.Mess
 }
 
 func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	handler = n.WrapHandler(handler)
 	options := broker.NewSubscribeOptions(opts...)
 
 	n.Lock()
@@ -213,12 +255,12 @@ func (n *natsBroker) Subscribe(topic string, handler broker.Handler, opts ...bro
 		return nil, err
 	}
 
-	return &natsSubscriber{
+	return n.WrapSubscriber(&natsSubscriber{
 		topic:  topic,
 		opts:   options,
 		sub:    sub,
 		cancel: cancel,
-	}, nil
+	}), nil
 }
 
 func (n *natsBroker) String() string {
@@ -264,7 +306,8 @@ func (e *natsEvent) Error() error { return nil }
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.NewOptions(opts...)
 	return &natsBroker{
-		opts: *options,
+		Runtime: broker.NewRuntimeForOptions("nats", *options),
+		opts:    *options,
 		newConn: func(addr string, opts ...nats.Option) (natsConn, error) {
 			return nats.Connect(addr, opts...)
 		},

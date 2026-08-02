@@ -24,6 +24,176 @@ QvCloud Broker 是一个面向生产场景的 Go 语言消息中间件抽象层�
     | **GCP Pub/Sub** | 🧪 持续完善 | **62.0%** | 谷歌云发布订阅 |
 - **可扩展性**: 插件化架构，轻松接入新的 MQ 实现。
 - **统一模型**: 厂商无关的消息模型。
+- **按需可观测**: 日志、健康、诊断快照、指标、上下文关联和状态事件默认关闭并可独立开启；现有 `Broker` 接口保持兼容。
+
+## 可观测性与故障排查
+
+可观测能力是可选功能，默认全部关闭，不会改变现有 `broker.Broker` 接口。应用可以按需独立启用健康状态、诊断快照、结构化故障、指标、Trace Context 和状态事件。
+
+### 快速体验与效果
+
+示例使用内存 No-op Broker，无需 Docker、MQ 服务或账号：
+
+```bash
+# 默认关闭：只有业务执行结果，没有可观测输出
+go run ./examples/observability
+
+# 查询被动健康状态和诊断快照
+go run ./examples/observability -observe -health -diagnostics
+
+# 开启全部信号并模拟发布失败
+go run ./examples/observability -observe -all -scenario=publish-failure
+
+# 主动探测；-probe 必须与 -health 一起使用
+go run ./examples/observability -observe -health -probe
+```
+
+正常场景的典型输出：
+
+```text
+health state=unknown ready=false
+snapshot broker=noop state=ready subscriptions=1 dropped=0 error_category=
+scenario name=normal status=complete
+```
+
+发布失败时的典型输出：
+
+```text
+event kind=operation.failed operation=publish outcome=failure state=ready
+snapshot broker=noop state=ready subscriptions=1 dropped=0 error_category=publish
+scenario error: demonstration publish failure
+```
+
+这些输出可以直接回答“是否已连接”“是否可接收流量”“哪个操作失败”“当前订阅数是多少”“事件是否因缓冲区满而丢弃”等排障问题。输出不会包含消息正文、连接凭据、签名查询参数或原始 Trace ID。
+
+### 在实际 Broker 中启用
+
+下面以 Kafka 为例；同一个 `broker.WithObservability(...)` 可用于 RabbitMQ、NATS、Redis、RocketMQ、SQS、Pub/Sub 和 No-op Broker：
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/qvcloud/broker"
+    "github.com/qvcloud/broker/brokers/kafka"
+)
+
+func main() {
+    sink := broker.EventSinkFunc(func(_ context.Context, event broker.BrokerStateEvent) error {
+        // 可替换为 slog、日志平台或告警系统；不要在这里执行耗时操作。
+        fmt.Printf("kind=%s operation=%s outcome=%s state=%s\n",
+            event.Kind, event.Operation, event.Outcome, event.To)
+        return nil
+    })
+
+    b := kafka.NewBroker(
+        broker.Addrs("127.0.0.1:9092"),
+        broker.WithObservability(
+            broker.EnableCategories(
+                broker.CategoryHealth,
+                broker.CategoryDiagnostics,
+                broker.CategoryLogging,
+                broker.CategoryMeasurements,
+                broker.CategoryCorrelation,
+                broker.CategoryStateEvents,
+            ),
+            broker.WithEventSink(sink),
+            broker.WithEventBuffer(256, broker.OverflowDropNewest),
+            broker.WithSinkTimeout(time.Second),
+            broker.WithProbeTimeout(3*time.Second),
+            broker.WithRedactedFields("x-company-secret"),
+            broker.WithInstanceID("order-consumer-01"),
+        ),
+    )
+
+    if err := b.Connect(); err != nil {
+        panic(err)
+    }
+    defer b.Disconnect()
+
+    observable, ok := b.(broker.Observable)
+    if !ok {
+        // 第三方 Broker 可以不实现该可选接口。
+        return
+    }
+
+    health := observable.Observability().Health()
+    fmt.Printf("state=%s connected=%t ready=%t\n",
+        health.State, health.Connected, health.Ready)
+
+    snapshot := observable.Observability().Snapshot()
+    fmt.Printf("subscriptions=%d publish_success=%d last_failure=%+v\n",
+        snapshot.SubscriptionCount,
+        snapshot.OperationTotals["publish:success"],
+        snapshot.LastFailure)
+}
+```
+
+`CategoryLogging` 或 `CategoryStateEvents` 开启时必须配置 `WithEventSink`，否则 `Connect()` 返回 `broker.ErrInvalidObservabilityConfig`。事件通过有界单 worker 异步派发；Sink 阻塞、报错或 panic 不会改变 Publish、Handler、Ack、Nack 的业务结果。队列满时按照指定策略丢弃，并通过 `Snapshot().DroppedRecords` 暴露数量。
+
+### 分类开关
+
+| 分类 | 作用 | 主要效果 |
+| :--- | :--- | :--- |
+| `CategoryLogging` | 结构化故障记录 | 向 Event Sink 发送已脱敏的操作失败事件 |
+| `CategoryHealth` | 健康状态 | 查询 `unknown/connecting/ready/degraded/reconnecting/stopped` |
+| `CategoryDiagnostics` | 诊断快照 | 查看操作结果、订阅数、进行中操作、最后错误和丢弃数 |
+| `CategoryMeasurements` | OpenTelemetry 指标 | 记录操作次数、耗时、进行中数量、重试、重连和订阅数 |
+| `CategoryCorrelation` | 调用链关联 | 使用 W3C `traceparent`/`tracestate` 随消息 Header 传播上下文 |
+| `CategoryStateEvents` | 状态事件 | 异步发送连接状态变化和故障事件 |
+
+运行期间也可以安全调整分类：
+
+```go
+obs := b.(broker.Observable).Observability()
+
+// 临时只保留健康和诊断能力
+err := obs.SetCategories(broker.Categories(
+    broker.CategoryHealth,
+    broker.CategoryDiagnostics,
+))
+```
+
+### 健康检查与主动探测
+
+`Health()` 是纯本地、无网络 I/O 的被动查询，适合高频状态页和排障接口。`Probe(ctx)` 才会执行主动检查，并受调用方取消和 `WithProbeTimeout` 限制：
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+
+status, err := b.(broker.Observable).Observability().Probe(ctx)
+switch {
+case err == nil && status.Ready:
+    // 主动探测成功
+case errors.Is(err, broker.ErrUnsupported):
+    // 当前适配器不支持主动探测，继续使用 Health() 的被动状态
+default:
+    // 超时、取消或连接异常
+}
+```
+
+| 适配器 | 主动探测方式 |
+| :--- | :--- |
+| Kafka | 可取消 TCP Dial |
+| RabbitMQ | AMQP 连接状态检查 |
+| NATS | `FlushWithContext` |
+| Redis | `PING` |
+| RocketMQ、SQS、GCP Pub/Sub | 返回 `broker.ErrUnsupported` |
+
+### 推荐排障顺序
+
+1. 调用 `Health()` 判断当前是未连接、降级、重连还是已停止。
+2. 必要时调用有超时的 `Probe(ctx)`，区分本地状态异常和网络端点异常。
+3. 读取 `Snapshot().LastFailure` 的安全错误分类，以及 `OperationTotals` 中对应操作的成功/失败次数。
+4. 检查 `SubscriptionCount`、`InFlight` 和 `DroppedRecords`，判断消费者、积压操作或事件 Sink 是否异常。
+5. 使用 Trace Context 在生产者与 Handler 链路间关联问题，但不要把消息 ID、Topic、用户 ID 等高基数字段作为指标维度。
+
+完整示例开关和场景说明见 [`examples/observability`](examples/observability/README.md)，各适配器差异见 [`ADAPTER_EXTENSIONS.md`](ADAPTER_EXTENSIONS.md)。禁用模式不启动事件 worker，实测目标热路径开销低于 1%；标准启用组合的代表性吞吐开销门禁为低于 5%。
 
 ## 项目结构
 

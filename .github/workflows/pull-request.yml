@@ -41,6 +41,15 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Build observability example
+        run: go build ./examples/observability
+
+      - name: Smoke test observability switches
+        run: |
+          go run ./examples/observability
+          go run ./examples/observability -observe -health -diagnostics
+          go run ./examples/observability -observe -metrics -correlation -events
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:

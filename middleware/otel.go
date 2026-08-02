@@ -10,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type otelHandlerKey struct{}
+
 // OtelHandler wraps a broker handler with OpenTelemetry tracing.
 func OtelHandler(h broker.Handler, opts ...Option) broker.Handler {
 	options := options{
@@ -20,6 +22,10 @@ func OtelHandler(h broker.Handler, opts ...Option) broker.Handler {
 	}
 
 	return func(ctx context.Context, event broker.Event) error {
+		if ctx.Value(otelHandlerKey{}) != nil {
+			return h(ctx, event)
+		}
+		ctx = context.WithValue(ctx, otelHandlerKey{}, struct{}{})
 		ctx, span := options.tracer.Start(ctx, "broker.handle",
 			trace.WithSpanKind(trace.SpanKindConsumer),
 			trace.WithAttributes(
