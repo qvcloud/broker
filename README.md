@@ -3,6 +3,7 @@
 [![CI](https://github.com/qvcloud/broker/actions/workflows/ci.yml/badge.svg)](https://github.com/qvcloud/broker/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/qvcloud/broker)](https://goreportcard.com/report/github.com/qvcloud/broker)
 [![License](https://img.shields.io/github/license/qvcloud/broker)](LICENSE)
+[![Visitors](https://hits.sh/github.com/qvcloud/broker.svg?style=flat-square&label=visitors&color=blue)](https://hits.sh/github.com/qvcloud/broker/)
 
 [English](README_EN.md) | [中文](README.md)
 
