@@ -290,6 +290,7 @@ func (r *redisBroker) processStream(ctx context.Context, client redisClient, top
 			raw:    xmsg,
 			group:  group,
 			client: client,
+			ctx:    ctx,
 		}
 
 		err := handler(ctx, event)
@@ -323,13 +324,26 @@ type redisEvent struct {
 	raw    redis.XMessage
 	group  string
 	client redisClient
+	ctx    context.Context
 }
 
 func (e *redisEvent) Topic() string            { return e.topic }
 func (e *redisEvent) Message() *broker.Message { return e.msg }
 func (e *redisEvent) Ack() error {
-	return e.client.XAck(context.Background(), e.topic, e.group, e.raw.ID).Err()
+	ctx := e.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return e.client.XAck(ctx, e.topic, e.group, e.raw.ID).Err()
 }
+
+// Nack handles negative acknowledgment for Redis Streams.
+// If requeue is false, the message is acknowledged via XAck (dropped from PEL).
+// If requeue is true, the message is NOT acknowledged, retaining it in the consumer
+// group's Pending Entries List (PEL).
+// Note: The active consumer loop reads new messages (">"). Retained PEL messages
+// are re-read on consumer startup ("0") or can be claimed via XCLAIM/XAUTOCLAIM.
+// See ADAPTER_EXTENSIONS.md §8 for details.
 func (e *redisEvent) Nack(requeue bool) error {
 	if !requeue {
 		return e.Ack()

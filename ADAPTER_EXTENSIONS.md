@@ -147,15 +147,54 @@
 
 ## 8. 消息确认一致性矩阵 (Ack/Nack Consistency)
 
-为了保证跨驱动的一致性，所有适配器均遵循以下语义：
+依据项目宪法（Constitution §II）要求，框架规范了 Handler 结果、`AutoAck`、显式 `Ack()` 与 `Nack(requeue)` 的语义映射。无法跨中间件完全归一化的底层协议差异必须如实公开，禁止隐藏在虚假的跨 Broker 保证之下。
+
+### 核心语义总表
 
 | 操作 | `AutoAck: true` (默认) | `AutoAck: false` | 语义说明 |
 | :--- | :--- | :--- | :--- |
-| **Handler 成功 (nil)** | 自动触发 `Ack()` | 不触发 `Ack()` | 业务处理成功 |
-| **Handler 失败 (error)** | 自动重试 | 自动重试 | 业务异常，需重试 |
-| **显式 \`event.Ack()\`** | 无需手动调用 | **必须手动调用** | 确认消息已处理 |
-| **\`event.Nack(true)\`** | 手动触发重试 | 手动触发重试 | 拒绝并重新入队 |
-| **\`event.Nack(false)\`** | 手动丢弃 | 手动丢弃 | 拒绝并直接丢弃 (跳过) |
+| **Handler 成功 (`nil`)** | 框架自动触发 `Ack()` | 不触发 `Ack()` | 业务处理成功，确认消息已消费 |
+| **Handler 失败 (`error`)** | 框架不触发 `Ack()`，触发重试/保留 | 框架不触发 `Ack()`，触发重试/保留 | 业务异常，按中间件原生策略重试或保持未确认 |
+| **显式 `event.Ack()`** | 无需手动调用 | **必须手动调用** | 显式向 Broker 提交确认，完成消息消费 |
+| **显式 `event.Nack(true)`** | 手动触发重试/保留 | 手动触发重试/保留 | 拒绝并重新入队或在待处理队列/PEL中保留（见下方差异说明） |
+| **显式 `event.Nack(false)`** | 手动丢弃 | 手动丢弃 | 拒绝并直接丢弃（跳过位点或从队列/PEL中移除） |
+
+---
+
+### 各适配器原生协议映射矩阵
+
+| 适配器 (Broker) | `Ack()` 原生协议映射 | `Nack(false)` (丢弃/跳过) | `Nack(true)` (重试/入队/保留) | 重新投递机制与差异说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| **RabbitMQ** | `delivery.Ack(false)` | `delivery.Nack(false, false)` | `delivery.Nack(false, true)` | 原生重新入队到队列头部；若配置 DLQ，丢弃消息转入死信交换机 |
+| **NATS** (JetStream) | `msg.Ack()` | `msg.Term()` | `msg.Nak()` | JetStream 服务端控制重投递与消费者退避调度 |
+| **AWS SQS** | `DeleteMessage` | `DeleteMessage` | `ChangeMessageVisibility(0)` | 设置不可见超时为 0 秒，使其立即对后续 ReceiveMessage 可见 |
+| **GCP Pub/Sub** | `msg.Ack()` | `msg.Ack()` | `msg.Nack()` | 触发 Google Cloud Pub/Sub 订阅原生重试与死信策略 |
+| **RocketMQ** | `ConsumeSuccess` | `ConsumeSuccess` | `ConsumeRetryLater` | 原生投递至 `%RETRY%` 重试主题进行阶梯式延时重投递 |
+| **Kafka** | `CommitMessages` | `CommitMessages` (提交位点) | **未提交位点 (保留在原分区)** | **存在平台差异 (Caveat)**：Kafka 为追加日志分区架构，无原生单消息重排原语。详见下文。 |
+| **Redis Streams** | `XACK` | `XACK` (从 PEL 移除) | **不执行 XACK (保留在 PEL)** | **存在平台差异 (Caveat)**：Redis Streams 无原生 Nack 命令。保留在消费组 PEL 中。详见下文。 |
+
+---
+
+### Kafka 确认与拒绝差异说明 (Caveat)
+
+- **底层架构约束**：Kafka 是基于只读追加日志（Append-only Log）与单调递增 Partition Offset 的流式系统。Kafka Broker 协议层不存在针对单个已拉取消息的“拒绝并重新放回队尾”原语。
+- **`Nack(false)` 行为**：视为业务主动跳过该消息，调用 `CommitMessages` 提交该消息位点，后续消费不会再拉取。
+- **`Nack(true)` 行为**：不提交该消息位点（返回 `nil`），该位点在当前消费会话中保持未提交状态（符合宪法 "retain" 原则）。
+- **生产注意事项**：
+  1. **单调位点覆盖**：由于分区消费位点是线性向前推进的，如果同分区的后续消息被处理并执行了 `Ack()`，后续位点的提交将连带将此前未提交的位点一并提交覆盖。
+  2. **进程内不重拉**：当前运行的消费者拉取循环按顺序向前拉取新消息，不会在活跃循环内自动倒回重拉已读消息。
+  3. **最佳实践**：若业务需实现可靠的单条消息重试或死信重排，建议通过业务逻辑将消息发布至专门的重试/死信主题（Retry / Dead Letter Topic）。
+
+---
+
+### Redis Streams 确认与拒绝差异说明 (Caveat)
+
+- **底层架构约束**：Redis 适配器基于 Redis Streams Consumer Group 实现，Redis 协议本身并未提供 `XNACK` 命令。
+- **`Nack(false)` 行为**：视为业务丢弃，调用 `XACK` 将该消息从当前消费组的待处理条目列表（Pending Entries List, PEL）中彻底确认并移除。
+- **`Nack(true)` 行为**：不调用 `XACK`（返回 `nil`），消息继续保留在当前消费组的 PEL 中，其空闲时间（idle time）继续累计（符合宪法 "retain" 原则）。
+- **生产注意事项**：
+  1. **活跃循环不重复派发**：当前消费者协程的主读取循环使用 `XREADGROUP ... >` 仅拉取分配给该消费者的最新未投递消息。因此被 `Nack(true)` 的消息不会在当前运行循环中立刻被重复派发。
+  2. **故障恢复与重认领**：保留在 PEL 中的消息可在消费者重启时重新加载（初始化阶段首先拉取 ID `"0"` 的 pending 消息），或者通过外部巡检/后台守护进程调用 `XPENDING` / `XCLAIM` / `XAUTOCLAIM` 将超时未确认的消息重新认领或故障转移给其他健康的消费者。
 
 ---
 

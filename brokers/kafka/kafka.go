@@ -356,9 +356,20 @@ func (e *kafkaEvent) Message() *broker.Message {
 }
 
 func (e *kafkaEvent) Ack() error {
-	return e.reader.CommitMessages(e.ctx, e.rawMsg)
+	ctx := e.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return e.reader.CommitMessages(ctx, e.rawMsg)
 }
 
+// Nack handles negative acknowledgment for Kafka.
+// If requeue is false, the message is committed (dropped/skipped).
+// If requeue is true, the message offset is NOT committed, retaining its uncommitted state.
+// Note: Because Kafka is an append-only log with monotonic partition offsets,
+// single-message requeue is not natively supported; committing subsequent messages
+// in the same partition will advance the committed offset past this message.
+// See ADAPTER_EXTENSIONS.md §8 for details.
 func (e *kafkaEvent) Nack(requeue bool) error {
 	if !requeue {
 		return e.Ack()

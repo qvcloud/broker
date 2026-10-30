@@ -211,8 +211,25 @@ func TestKafka_Event_Methods(t *testing.T) {
 		assert.True(t, committed)
 	})
 
-	t.Run("Nack", func(t *testing.T) {
+	t.Run("Nack_RequeueTrue", func(t *testing.T) {
+		committed := false
+		mockR.commitFunc = func(ctx context.Context, msgs ...kafka.Message) error {
+			committed = true
+			return nil
+		}
 		err := event.Nack(true)
 		assert.NoError(t, err)
+		assert.False(t, committed, "Nack(true) must not commit message offset")
+	})
+
+	t.Run("Nack_RequeueFalse", func(t *testing.T) {
+		committed := false
+		mockR.commitFunc = func(ctx context.Context, msgs ...kafka.Message) error {
+			committed = true
+			return nil
+		}
+		err := event.Nack(false)
+		assert.NoError(t, err)
+		assert.True(t, committed, "Nack(false) must commit message offset to skip/drop")
 	})
 }

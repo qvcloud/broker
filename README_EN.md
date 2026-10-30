@@ -223,7 +223,8 @@ The `error` returned by the handler function in `b.Subscribe` directly affects t
 - **Return `error`**: The processing failed. The message will not be acknowledged. Depending on the underlying MQ implementation, the message will typically:
     - **Requeue**: e.g., in RabbitMQ, it returns to the queue for another attempt.
     - **Wait for Timeout**: e.g., in SQS or GCP Pub/Sub, the message becomes visible again after the Visibility Timeout expires.
-    - **Pause Commit**: e.g., in Kafka, it might delay the advancement of the consumer offset.
+    - **Retry Topic**: e.g., in RocketMQ, the message is scheduled via `%RETRY%` topic.
+    - **Pause Commit / Retain in PEL**: e.g., in Kafka the offset remains uncommitted, and in Redis Streams the message remains in the consumer group PEL. See [`ADAPTER_EXTENSIONS.md`](ADAPTER_EXTENSIONS.md) for full per-adapter semantics and `Nack(requeue)` caveats.
 
 **Pro-tip**: For logical errors or errors that cannot be fixed by retrying, it is recommended to catch the exception, log it, and return `nil`, or manually move the message to a Dead Letter Queue (DLQ) to avoid blocking the queue with infinite retries.
 

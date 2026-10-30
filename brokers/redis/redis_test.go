@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -241,22 +242,57 @@ func TestRedis_Extra_Coverage(t *testing.T) {
 	})
 
 	t.Run("EventMethods", func(t *testing.T) {
+		var ackedStream, ackedGroup, ackedID string
+		ackCallCount := 0
 		mockC.xAckFunc = func(ctx context.Context, stream, group string, ids ...string) *redis.IntCmd {
-			return redis.NewIntCmd(ctx)
+			ackCallCount++
+			ackedStream = stream
+			ackedGroup = group
+			if len(ids) > 0 {
+				ackedID = ids[0]
+			}
+			cmd := redis.NewIntCmd(ctx)
+			cmd.SetVal(1)
+			return cmd
 		}
 		event := &redisEvent{
-			topic:  "test",
-			msg:    &broker.Message{},
-			raw:    redis.XMessage{ID: "1-0"},
-			group:  "group",
+			topic:  "test-stream",
+			msg:    &broker.Message{Body: []byte("payload")},
+			raw:    redis.XMessage{ID: "1526985054000-0"},
+			group:  "test-group",
 			client: mockC,
+			ctx:    context.Background(),
 		}
-		assert.Equal(t, "test", event.Topic())
+		assert.Equal(t, "test-stream", event.Topic())
 		assert.NotNil(t, event.Message())
-		assert.NoError(t, event.Ack())
-		assert.NoError(t, event.Nack(false))
-		assert.NoError(t, event.Nack(true))
 		assert.NoError(t, event.Error())
+
+		// Test Ack()
+		ackCallCount = 0
+		assert.NoError(t, event.Ack())
+		assert.Equal(t, 1, ackCallCount)
+		assert.Equal(t, "test-stream", ackedStream)
+		assert.Equal(t, "test-group", ackedGroup)
+		assert.Equal(t, "1526985054000-0", ackedID)
+
+		// Test Nack(false): should Ack to drop/remove from PEL
+		ackCallCount = 0
+		assert.NoError(t, event.Nack(false))
+		assert.Equal(t, 1, ackCallCount, "Nack(false) must call XAck to drop message from PEL")
+
+		// Test Nack(true): should NOT Ack, retaining message in PEL
+		ackCallCount = 0
+		assert.NoError(t, event.Nack(true))
+		assert.Equal(t, 0, ackCallCount, "Nack(true) must NOT call XAck so entry is retained in PEL")
+
+		// Test Ack error propagation
+		mockC.xAckFunc = func(ctx context.Context, stream, group string, ids ...string) *redis.IntCmd {
+			cmd := redis.NewIntCmd(ctx)
+			cmd.SetErr(errors.New("xack failed"))
+			return cmd
+		}
+		assert.Error(t, event.Ack())
+		assert.Error(t, event.Nack(false))
 	})
 
 	t.Run("SubscriberInfo", func(t *testing.T) {
